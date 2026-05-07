@@ -7,6 +7,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDialogs: () => ipcRenderer.invoke('telegram:get-dialogs'),
   getForumTopics: (chatId) => ipcRenderer.invoke('telegram:get-forum-topics', chatId),
   getAvatar: (chatId) => ipcRenderer.invoke('telegram:get-avatar', chatId),
+  resolveLink: (url) => ipcRenderer.invoke('telegram:resolve-link', url),
+  openExternal: (url) => ipcRenderer.invoke('openExternal', url),
+  onDeepLink: (callback) => {
+    ipcRenderer.on('deep-link', (_event, url) => callback(url));
+  },
   getMessages: (data) => ipcRenderer.invoke('telegram:get-messages', data),
   getMessageMedia: (data) => ipcRenderer.invoke('telegram:get-message-media', data),
   getMessageMediaFile: (data) => ipcRenderer.invoke('telegram:get-message-media-file', data),
@@ -14,6 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveMessageMediaFile: (data) => ipcRenderer.invoke('telegram:save-message-media-file', data),
   selectFolder: () => ipcRenderer.invoke('dialog:select-folder'),
   startDownload: (data) => ipcRenderer.invoke('telegram:start-download', data),
+  stopDownload: () => ipcRenderer.invoke('telegram:stop-download'),
   onDownloadProgress: (callback) => {
     ipcRenderer.on('download:progress', (_event, value) => callback(value));
   },

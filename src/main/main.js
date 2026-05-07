@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -19,6 +19,7 @@ let mainWindow;
 let client;
 let mediaStreamServer;
 let mediaStreamBaseUrl = '';
+let activeDownloadAborted = false;
 
 // Load existing session if available
 const SESSION_FILE = path.join(app.getPath('userData'), 'telegram_session.txt');
@@ -129,13 +130,9 @@ function emitMediaProgress(chatId, messageId, downloaded, total, stage) {
 }
 
 async function downloadPreviewMedia(message, isPlayableVideo) {
-  if (!isPlayableVideo) {
-    return client.downloadMedia(message, { workers: 1 });
-  }
+  const thumbSizes = [1, 0];
 
-  const thumbCandidates = [1, 0];
-
-  for (const thumb of thumbCandidates) {
+  for (const thumb of thumbSizes) {
     try {
       const buffer = await client.downloadMedia(message, {
         thumb,
@@ -150,11 +147,39 @@ async function downloadPreviewMedia(message, isPlayableVideo) {
     }
   }
 
-  return undefined;
+  return client.downloadMedia(message, { workers: 1 });
 }
 
-async function waitForReadableBytes(streamState, startByte, timeoutMs = 15000) {
+const streamEventTargets = new Map();
+
+function notifyStreamListeners(streamKey) {
+  const targets = streamEventTargets.get(streamKey);
+  if (targets) {
+    for (const target of targets) {
+      target.notify();
+    }
+  }
+}
+
+class StreamByteNotifier {
+  constructor() {
+    this._resolve = null;
+    this._promise = new Promise(r => { this._resolve = r; });
+  }
+  notify() {
+    if (this._resolve) {
+      this._resolve();
+      this._resolve = null;
+    }
+  }
+  wait() {
+    return this._promise;
+  }
+}
+
+async function waitForReadableBytes(streamState, startByte, timeoutMs = 30000) {
   const startedAt = Date.now();
+  const streamKey = streamState.streamKey;
 
   while (Date.now() - startedAt < timeoutMs) {
     const size = fs.existsSync(streamState.filePath) ? fs.statSync(streamState.filePath).size : 0;
@@ -166,7 +191,26 @@ async function waitForReadableBytes(streamState, startByte, timeoutMs = 15000) {
       return size;
     }
 
-    await wait(250);
+    const notifier = new StreamByteNotifier();
+    if (!streamEventTargets.has(streamKey)) {
+      streamEventTargets.set(streamKey, []);
+    }
+    streamEventTargets.get(streamKey).push(notifier);
+
+    const raceResult = await Promise.race([
+      notifier.wait(),
+      new Promise(resolve => setTimeout(resolve, 500))
+    ]);
+
+    const idx = streamEventTargets.get(streamKey)?.indexOf(notifier);
+    if (idx !== undefined && idx >= 0) {
+      streamEventTargets.get(streamKey).splice(idx, 1);
+    }
+
+    const currentSize = fs.existsSync(streamState.filePath) ? fs.statSync(streamState.filePath).size : 0;
+    if (currentSize > startByte) {
+      return currentSize;
+    }
   }
 
   return fs.existsSync(streamState.filePath) ? fs.statSync(streamState.filePath).size : 0;
@@ -177,9 +221,16 @@ async function ensureVideoStream(chatId, messageId) {
 
   const streamKey = `${chatId}:${messageId}`;
   const existingStream = mediaStreams.get(streamKey);
-  if (existingStream) {
+  if (existingStream && !existingStream.error) {
     existingStream.lastAccessAt = Date.now();
     return existingStream;
+  }
+
+  if (existingStream?.error) {
+    mediaStreams.delete(streamKey);
+    if (fs.existsSync(existingStream.filePath)) {
+      try { fs.unlinkSync(existingStream.filePath); } catch (_) {}
+    }
   }
 
   const entity = await client.getEntity(chatId);
@@ -198,7 +249,11 @@ async function ensureVideoStream(chatId, messageId) {
     `${sanitizeForFilename(chatId)}_${messageId}_${token}${getMediaFileExtension(message)}`
   );
 
-  fs.closeSync(fs.openSync(filePath, 'w'));
+  const fd = fs.openSync(filePath, 'w');
+  if (totalBytes > 0) {
+    fs.ftruncateSync(fd, totalBytes);
+  }
+  fs.closeSync(fd);
 
   const streamState = {
     token,
@@ -207,24 +262,27 @@ async function ensureVideoStream(chatId, messageId) {
     totalBytes,
     completed: false,
     error: null,
-    lastAccessAt: Date.now()
+    lastAccessAt: Date.now(),
+    streamKey
   };
 
   mediaStreams.set(streamKey, streamState);
 
   client.downloadMedia(message, {
     outputFile: filePath,
-    workers: 1,
     progressCallback: (downloaded, total) => {
       streamState.lastAccessAt = Date.now();
       emitMediaProgress(chatId, messageId, downloaded, total, 'streaming');
+      notifyStreamListeners(streamKey);
     }
   }).then(() => {
     streamState.completed = true;
     emitMediaProgress(chatId, messageId, streamState.totalBytes || 1, streamState.totalBytes || 1, 'streaming');
+    notifyStreamListeners(streamKey);
   }).catch(error => {
     streamState.error = error;
     console.error('Error streaming video media:', error);
+    notifyStreamListeners(streamKey);
   });
 
   return streamState;
@@ -244,7 +302,6 @@ async function handleMediaStreamRequest(req, res) {
   streamState.lastAccessAt = Date.now();
 
   const rangeHeader = req.headers.range;
-  const defaultChunkSize = 1024 * 1024;
   let start = 0;
   let requestedEnd = null;
 
@@ -252,47 +309,70 @@ async function handleMediaStreamRequest(req, res) {
     const match = /bytes=(\d+)-(\d*)/.exec(rangeHeader);
     if (match) {
       start = Number(match[1]);
-      requestedEnd = match[2] ? Number(match[2]) : null;
+      if (match[2]) {
+        requestedEnd = Number(match[2]);
+      }
     }
   }
 
-  const currentSize = await waitForReadableBytes(streamState, start);
+  const requestedStart = start;
+  const currentSize = await waitForReadableBytes(streamState, requestedStart);
 
-  if (currentSize <= start && streamState.completed) {
-    res.writeHead(416, {
-      'Content-Range': `bytes */${streamState.totalBytes || currentSize}`
-    });
-    res.end();
-    return;
+  if (currentSize <= requestedStart && streamState.completed) {
+    const totalSize = streamState.totalBytes || currentSize;
+    if (requestedStart >= totalSize) {
+      res.writeHead(416, {
+        'Content-Range': `bytes */${totalSize}`
+      });
+      res.end();
+      return;
+    }
   }
 
-  if (currentSize <= start) {
+  if (currentSize <= requestedStart && !streamState.completed) {
     res.writeHead(425);
     res.end();
     return;
   }
 
+  const maxChunkSize = 4 * 1024 * 1024;
   const end = Math.min(
-    requestedEnd ?? start + defaultChunkSize - 1,
+    requestedEnd ?? (requestedStart + maxChunkSize - 1),
     currentSize - 1
   );
 
-  const contentLength = end - start + 1;
+  const contentLength = end - requestedStart + 1;
   const totalSize = streamState.totalBytes || Math.max(currentSize, end + 1);
 
-  res.writeHead(206, {
-    'Content-Type': streamState.mimeType,
-    'Accept-Ranges': 'bytes',
-    'Content-Length': contentLength,
-    'Content-Range': `bytes ${start}-${end}/${totalSize}`,
-    'Cache-Control': 'no-store'
-  });
+  if (rangeHeader) {
+    res.writeHead(206, {
+      'Content-Type': streamState.mimeType,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': contentLength,
+      'Content-Range': `bytes ${requestedStart}-${end}/${totalSize}`,
+      'Cache-Control': 'no-store'
+    });
+  } else {
+    res.writeHead(200, {
+      'Content-Type': streamState.mimeType,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': contentLength,
+      'Cache-Control': 'no-store'
+    });
+  }
 
-  fs.createReadStream(streamState.filePath, { start, end }).pipe(res);
+  fs.createReadStream(streamState.filePath, { start: requestedStart, end }).pipe(res);
 }
 
 async function startMediaStreamServer() {
   if (mediaStreamServer) return;
+
+  ensureMediaStreamDir();
+
+  const existingFiles = fs.readdirSync(MEDIA_STREAM_DIR);
+  for (const file of existingFiles) {
+    try { fs.unlinkSync(path.join(MEDIA_STREAM_DIR, file)); } catch (_) {}
+  }
 
   mediaStreamServer = http.createServer((req, res) => {
     handleMediaStreamRequest(req, res).catch(error => {
@@ -311,9 +391,19 @@ async function startMediaStreamServer() {
       resolve();
     });
   });
+
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, state] of mediaStreams.entries()) {
+      if (now - state.lastAccessAt > 30 * 60 * 1000) {
+        mediaStreams.delete(key);
+        try { fs.unlinkSync(state.filePath); } catch (_) {}
+      }
+    }
+  }, 5 * 60 * 1000);
 }
 
-async function getVisibleMessagesPage(entity, limit = 50, offsetId = 0) {
+async function getVisibleMessagesPage(entity, limit = 50, offsetId = 0, replyTo = undefined) {
   const visibleMessages = [];
   let nextOffsetId = offsetId;
   let hasMore = true;
@@ -322,7 +412,8 @@ async function getVisibleMessagesPage(entity, limit = 50, offsetId = 0) {
   while (visibleMessages.length < limit && hasMore) {
     const batch = await client.getMessages(entity, {
       limit: chunkSize,
-      offsetId: nextOffsetId || undefined
+      offsetId: nextOffsetId || undefined,
+      replyTo
     });
 
     const messagesBatch = Array.isArray(batch) ? batch : batch ? [batch] : [];
@@ -350,11 +441,16 @@ async function getVisibleMessagesPage(entity, limit = 50, offsetId = 0) {
   };
 }
 
+const RESOURCES_PATH = isDev
+  ? path.join(__dirname, '../../build')
+  : process.resourcesPath;
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     autoHideMenuBar: true,
+    icon: path.join(RESOURCES_PATH, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.cjs'),
       nodeIntegration: false,
@@ -364,6 +460,36 @@ function createWindow() {
 
   mainWindow.setMenu(null);
 
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase().replace(/^(www\.)/, '');
+    if (host === 't.me' || host === 'telegram.me' || host === 'telegram.dog') {
+      mainWindow.webContents.send('deep-link', url);
+    } else if (url.startsWith('tg://')) {
+      mainWindow.webContents.send('deep-link', url);
+    } else {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const isDevServer = isDev && url.startsWith(process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173');
+    const isLocalFile = url.startsWith('file://');
+    if (!isDevServer && !isLocalFile) {
+      event.preventDefault();
+      const parsed = new URL(url);
+      const host = parsed.hostname.toLowerCase().replace(/^(www\.)/, '');
+      if (host === 't.me' || host === 'telegram.me' || host === 'telegram.dog') {
+        mainWindow.webContents.send('deep-link', url);
+      } else if (url.startsWith('tg://')) {
+        mainWindow.webContents.send('deep-link', url);
+      } else {
+        shell.openExternal(url);
+      }
+    }
+  });
+
   if (isDev) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173');
     mainWindow.webContents.openDevTools();
@@ -372,15 +498,39 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(async () => {
-  await startMediaStreamServer();
-  createWindow();
+const PROTOCOL = 'tg';
+app.setAsDefaultProtocolClient(PROTOCOL);
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, commandLine) => {
+    const url = commandLine.find(arg => arg.startsWith('tg://') || arg.includes('t.me/') || arg.includes('telegram.me/'));
+    if (url && mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+      mainWindow.webContents.send('deep-link', url);
     }
   });
+
+  app.whenReady().then(async () => {
+    await startMediaStreamServer();
+    createWindow();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  });
+}
+
+app.on('open-url', (_event, url) => {
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('deep-link', url);
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -453,6 +603,75 @@ ipcMain.handle('telegram:check-auth', async () => {
       console.error("Auth check failed:", e);
       return { isAuthorized: false };
     }
+});
+
+ipcMain.handle('telegram:resolve-link', async (event, url) => {
+  try {
+    let resolvedUrl = url;
+    if (url.startsWith('tg://')) {
+      try {
+        const parsed = new URL(url);
+        if (parsed.hostname === 'resolve' && parsed.searchParams.has('domain')) {
+          resolvedUrl = `https://t.me/${parsed.searchParams.get('domain')}`;
+        } else if (parsed.hostname === 'resolve' && parsed.searchParams.has('phone')) {
+          return { success: false, error: 'Unsupported link type' };
+        } else {
+          return { success: false, error: 'Unsupported tg:// link type' };
+        }
+      } catch (_) {
+        return { success: false, error: 'Invalid tg:// link' };
+      }
+    }
+
+    let username = null;
+
+    try {
+      const parsed = new URL(resolvedUrl);
+      const host = parsed.hostname.toLowerCase().replace(/^(www\.)?/, '');
+      if (host === 't.me' || host === 'telegram.me' || host === 'telegram.dog') {
+        username = parsed.pathname.split('/').filter(Boolean)[0] || null;
+      }
+    } catch (_) {}
+
+    if (!username) {
+      const match = resolvedUrl.match(/(?:t\.me|telegram\.me|telegram\.dog)\/([a-zA-Z0-9_]{5,32})/);
+      if (match) username = match[1];
+    }
+
+    if (!username || username.startsWith('+') || username === 'c') {
+      return { success: false, error: 'Unsupported link type' };
+    }
+
+    const entity = await client.getEntity(username);
+    const entityId = entity.id?.toString();
+
+    const dialogs = await client.getDialogs();
+    const found = dialogs.find(d => d.id?.toString() === entityId);
+
+    return {
+      success: true,
+      chat: found ? {
+        id: found.id.toString(),
+        title: found.title,
+        isGroup: found.isGroup,
+        isChannel: found.isChannel,
+        hasTopics: Boolean(found.entity?.forum)
+      } : {
+        id: entityId,
+        title: entity.title || entity.firstName || username,
+        isGroup: !!(entity.megagroup || entity.left || entity.gigagroup || entity.className === 'Channel'),
+        isChannel: !!(entity.broadcast),
+        hasTopics: false
+      }
+    };
+  } catch (error) {
+    console.error('Error resolving Telegram link:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('openExternal', async (_event, url) => {
+  shell.openExternal(url);
 });
 
 ipcMain.handle('telegram:get-dialogs', async () => {
@@ -545,23 +764,35 @@ ipcMain.handle('telegram:get-avatar', async (event, chatId) => {
 });
 
 // Get chat messages (for preview)
-ipcMain.handle('telegram:get-messages', async (event, { chatId, limit = 50, offsetId = 0 }) => {
+ipcMain.handle('telegram:get-messages', async (event, { chatId, limit = 50, offsetId = 0, topicId }) => {
   try {
     const entity = await client.getEntity(chatId);
-    const { messages, hasMore, oldestMessageId } = await getVisibleMessagesPage(entity, limit, offsetId);
+    const replyTo = topicId ? topicId : undefined;
+    const { messages, hasMore, oldestMessageId } = await getVisibleMessagesPage(entity, limit, offsetId, replyTo);
     
     return {
       success: true,
-      messages: messages.map(m => ({
-        id: m.id,
-        text: m.message || '',
-        hasMedia: !!m.media,
-        isPhoto: !!m.photo,
-        isVideo: !!m.video || (m.document && m.document.mimeType && m.document.mimeType.startsWith('video/')),
-        date: m.date,
-        out: m.out,
-        senderId: m.senderId ? m.senderId.toString() : null
-      })).reverse(),
+      messages: messages.map(m => {
+        let mediaSize = null;
+        if (m.document && m.document.size) {
+            mediaSize = Number(m.document.size);
+        } else if (m.photo && m.photo.sizes && m.photo.sizes.length > 0) {
+            const biggest = m.photo.sizes[m.photo.sizes.length - 1];
+            if (biggest && biggest.size) mediaSize = Number(biggest.size);
+        }
+
+        return {
+          id: m.id,
+          text: m.message || '',
+          hasMedia: !!m.media,
+          isPhoto: !!m.photo,
+          isVideo: !!m.video || (m.document && m.document.mimeType && m.document.mimeType.startsWith('video/')),
+          mediaSize,
+          date: m.date,
+          out: m.out,
+          senderId: m.senderId ? m.senderId.toString() : null
+        };
+      }).reverse(),
       hasMore,
       oldestMessageId
     };
@@ -698,9 +929,17 @@ ipcMain.handle('dialog:select-folder', async () => {
   }
 });
 
+ipcMain.handle('telegram:stop-download', async () => {
+  activeDownloadAborted = true;
+  console.log('Mass download: stop requested');
+  return { success: true };
+});
+
 // Mass download logic
 ipcMain.handle('telegram:start-download', async (event, { chatId, folderPath, topic }) => {
   try {
+    console.log('Mass download: started');
+    activeDownloadAborted = false;
     const entity = await client.getEntity(chatId);
     const downloadFolder = topic?.title
       ? path.join(folderPath, sanitizeForFilename(topic.title))
@@ -713,25 +952,63 @@ ipcMain.handle('telegram:start-download', async (event, { chatId, folderPath, to
     if (!fs.existsSync(downloadFolder)) {
       fs.mkdirSync(downloadFolder, { recursive: true });
     }
-    
+
+    // Phase 1: Scanning
+    event.sender.send('download:progress', { 
+      chatId, 
+      total: 0, 
+      downloaded: 0, 
+      currentFile: 'Scanning for media...',
+      topicTitle: topic?.title || null,
+      isScanning: true
+    });
+
+    let totalMedia = 0;
+    const scanningIter = client.iterMessages(entity, topic?.id
+      ? { limit: undefined, replyTo: topic.id }
+      : { limit: undefined });
+
+    for await (const message of scanningIter) {
+      if (activeDownloadAborted) break;
+      if (isDownloadableMedia(message)) {
+        totalMedia++;
+        if (totalMedia % 50 === 0) {
+          event.sender.send('download:progress', { 
+            chatId, 
+            total: 0, 
+            downloaded: 0, 
+            currentFile: `Scanning messages... (${totalMedia} found so far)`,
+            topicTitle: topic?.title || null,
+            isScanning: true
+          });
+        }
+      }
+    }
+
+    if (activeDownloadAborted) {
+      return { success: true, aborted: true };
+    }
+
+    // Phase 2: Downloading
     const messagesIter = client.iterMessages(entity, topic?.id
       ? { limit: undefined, replyTo: topic.id }
       : { limit: undefined });
 
     for await (const message of messagesIter) {
+      if (activeDownloadAborted) break;
+
       if (isDownloadableMedia(message)) {
         current++;
         const safeName = getMessageDownloadFilename(message);
         const filePath = path.join(downloadFolder, safeName);
+        const partialFilePath = `${filePath}.part`;
         
         if (fs.existsSync(filePath)) {
-           console.log(`Skipping existing file: ${safeName}`);
            skippedCount++;
-           // We only send progress update every 10 skipped files to avoid freezing the UI with thousands of skipped files
-           if (skippedCount % 10 === 0) {
+           if (skippedCount % 10 === 0 || current === totalMedia) {
              event.sender.send('download:progress', { 
                chatId, 
-               total: current, 
+               total: totalMedia, 
                downloaded: downloadedCount + skippedCount, 
                currentFile: `Skipping already downloaded files... (${skippedCount} skipped)`,
                topicTitle: topic?.title || null
@@ -740,9 +1017,13 @@ ipcMain.handle('telegram:start-download', async (event, { chatId, folderPath, to
            continue;
         }
 
+        if (fs.existsSync(partialFilePath)) {
+          fs.unlinkSync(partialFilePath);
+        }
+
         event.sender.send('download:progress', { 
            chatId, 
-           total: current, 
+           total: totalMedia, 
            downloaded: downloadedCount + skippedCount, 
            currentFile: safeName,
            topicTitle: topic?.title || null
@@ -751,8 +1032,12 @@ ipcMain.handle('telegram:start-download', async (event, { chatId, folderPath, to
         try {
           const downloadedFile = await client.downloadMedia(message, {
             workers: 1,
-            outputFile: filePath,
+            outputFile: partialFilePath,
             progressCallback: (downloaded, total) => {
+              if (activeDownloadAborted) {
+                throw new Error('STOP_ABORTED');
+              }
+
               const downloadedNumber = toNumberValue(downloaded);
               const totalNumber = toNumberValue(total);
               const percent = totalNumber > 0
@@ -761,40 +1046,60 @@ ipcMain.handle('telegram:start-download', async (event, { chatId, folderPath, to
 
               event.sender.send('download:progress', {
                 chatId,
-                total: current,
-                downloaded: downloadedCount + skippedCount,
+                total: totalMedia,
+                downloaded: downloadedCount + skippedCount + (percent / 100),
                 currentFile: `${safeName} (${percent}%)`,
                 topicTitle: topic?.title || null
               });
             }
           });
           
-          if (downloadedFile || fs.existsSync(filePath)) {
+          if (activeDownloadAborted) {
+            if (fs.existsSync(partialFilePath)) {
+              fs.unlinkSync(partialFilePath);
+            }
+            break;
+          }
+
+          if (downloadedFile || fs.existsSync(partialFilePath)) {
+             fs.renameSync(partialFilePath, filePath);
              downloadedCount++;
              
              event.sender.send('download:progress', { 
                chatId, 
-               total: current, 
+               total: totalMedia, 
                downloaded: downloadedCount + skippedCount, 
                currentFile: safeName,
                topicTitle: topic?.title || null
              });
           } else {
+            if (fs.existsSync(partialFilePath)) {
+              fs.unlinkSync(partialFilePath);
+            }
             failedCount++;
             event.sender.send('download:progress', {
               chatId,
-              total: current,
+              total: totalMedia,
               downloaded: downloadedCount + skippedCount,
               currentFile: `Failed: ${safeName}`,
               topicTitle: topic?.title || null
             });
           }
         } catch (err) {
+          if (err.message === 'STOP_ABORTED' || activeDownloadAborted) {
+            if (fs.existsSync(partialFilePath)) {
+              fs.unlinkSync(partialFilePath);
+            }
+            break;
+          }
           console.error(`Failed to download ${safeName}:`, err);
+          if (fs.existsSync(partialFilePath)) {
+            fs.unlinkSync(partialFilePath);
+          }
           failedCount++;
           event.sender.send('download:progress', {
             chatId,
-            total: current,
+            total: totalMedia,
             downloaded: downloadedCount + skippedCount,
             currentFile: `Failed: ${safeName}`,
             topicTitle: topic?.title || null
@@ -803,17 +1108,21 @@ ipcMain.handle('telegram:start-download', async (event, { chatId, folderPath, to
       }
     }
 
+    const finalStatus = activeDownloadAborted 
+      ? `Stopped: ${downloadedCount} downloaded, ${skippedCount} skipped`
+      : totalMedia === 0
+        ? 'No downloadable media found'
+        : `Done: ${downloadedCount} downloaded, ${skippedCount} skipped, ${failedCount} failed`;
+
     event.sender.send('download:progress', {
       chatId,
-      total: current,
+      total: totalMedia,
       downloaded: downloadedCount + skippedCount,
-      currentFile: current === 0
-        ? 'No downloadable media found'
-        : `Done: ${downloadedCount} downloaded, ${skippedCount} skipped, ${failedCount} failed`,
+      currentFile: finalStatus,
       topicTitle: topic?.title || null
     });
 
-    return { success: true, downloadedCount, skippedCount, failedCount, total: current };
+    return { success: true, downloadedCount, skippedCount, failedCount, total: totalMedia, aborted: activeDownloadAborted };
   } catch (error) {
     console.error("Download error:", error);
     return { success: false, error: error.message };

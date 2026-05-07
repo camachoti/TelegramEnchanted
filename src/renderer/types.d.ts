@@ -9,7 +9,10 @@ declare global {
       getDialogs: () => Promise<{ success: boolean; dialogs?: Array<{ id: string; title: string; isGroup: boolean; isChannel: boolean; hasTopics?: boolean }>; error?: string }>;
       getForumTopics: (chatId: string) => Promise<{ success: boolean; topics?: Array<{ id: number; title: string; topMessageId: number; unreadCount: number; closed: boolean; pinned: boolean }>; error?: string }>;
       getAvatar: (chatId: string) => Promise<{ success: boolean; base64?: string }>;
-      getMessages: (data: { chatId: string; limit?: number; offsetId?: number }) => Promise<{ success: boolean; messages?: Array<{ id: number; text: string; date: number; out: boolean; senderId: string | null; hasMedia: boolean; isPhoto: boolean; isVideo: boolean; }>; hasMore?: boolean; oldestMessageId?: number | null; error?: string }>;
+      resolveLink: (url: string) => Promise<{ success: boolean; chat?: { id: string; title: string; isGroup: boolean; isChannel: boolean; hasTopics?: boolean }; error?: string }>;
+      openExternal: (url: string) => Promise<void>;
+      onDeepLink: (callback: (url: string) => void) => void;
+      getMessages: (data: { chatId: string; limit?: number; offsetId?: number; topicId?: number }) => Promise<{ success: boolean; messages?: Array<{ id: number; text: string; date: number; out: boolean; senderId: string | null; hasMedia: boolean; isPhoto: boolean; isVideo: boolean; }>; hasMore?: boolean; oldestMessageId?: number | null; error?: string }>;
       getMessageMedia: (data: { chatId: string; messageId: number }) => Promise<{ success: boolean; base64?: string; mimeType?: string; error?: string }>;
       getMessageMediaFile: (data: { chatId: string; messageId: number }) => Promise<{ success: boolean; base64?: string; mimeType?: string; error?: string }>;
       getMessageMediaStream: (data: { chatId: string; messageId: number }) => Promise<{ success: boolean; streamUrl?: string; mimeType?: string; error?: string }>;
