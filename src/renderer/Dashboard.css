@@ -1058,15 +1058,18 @@
 
 .media-stream-progress-overlay {
   position: absolute;
-  left: 16px;
-  top: 16px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(14, 22, 31, 0.74);
-  color: #ffffff;
+  left: 20px;
+  top: 20px;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface);
+  color: var(--text-primary);
   font-size: 12px;
-  font-weight: 700;
-  backdrop-filter: blur(8px);
+  font-weight: 600;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: var(--border-subtle);
+  box-shadow: var(--shadow-glass);
 }
 
 .modal-overlay {
@@ -1075,9 +1078,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(11, 16, 20, 0.6);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--bg-overlay);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   z-index: 1000;
 }
 

@@ -52,8 +52,10 @@ export const Dashboard: React.FC = () => {
   const [oldestMessageId, setOldestMessageId] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
+  const topicListRef = useRef<HTMLDivElement>(null);
   const shouldScrollToBottomRef = useRef(false);
   const preserveScrollPositionRef = useRef<number | null>(null);
+  const topicListScrollRef = useRef<number>(0);
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [forumTopics, setForumTopics] = useState<ForumTopic[]>([]);
@@ -209,6 +211,8 @@ export const Dashboard: React.FC = () => {
       fetchForumTopics(selectedChat);
       if (!selectedChat.hasTopics) {
         loadMessages(selectedChat.id);
+      } else {
+        topicListScrollRef.current = 0;
       }
     } else {
       setMessages([]);
@@ -234,6 +238,12 @@ export const Dashboard: React.FC = () => {
       shouldScrollToBottomRef.current = false;
     }
   }, [messages]);
+
+  useEffect(() => {
+    if (!viewingTopic && !loadingTopics && selectedChat?.hasTopics && topicListRef.current) {
+      topicListRef.current.scrollTop = topicListScrollRef.current;
+    }
+  }, [viewingTopic, loadingTopics, selectedChat?.id]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -273,6 +283,9 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleSelectTopic = (topic: ForumTopic) => {
+    if (topicListRef.current) {
+      topicListScrollRef.current = topicListRef.current.scrollTop;
+    }
     setViewingTopic(topic);
     setSelectedTopicId(String(topic.id));
     loadMessages(selectedChat!.id, 0, topic.id);
@@ -287,6 +300,9 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleViewAllTopics = () => {
+    if (topicListRef.current) {
+      topicListScrollRef.current = topicListRef.current.scrollTop;
+    }
     setViewingTopic({ id: 0, title: 'Todos os tópicos', topMessageId: 0, unreadCount: 0, closed: false, pinned: false });
     setSelectedTopicId('all');
     loadMessages(selectedChat!.id);
@@ -661,7 +677,11 @@ export const Dashboard: React.FC = () => {
             
             {selectedChat.hasTopics && !viewingTopic ? (
               <div className="chat-viewer full-width">
-                <div className="chat-messages" onClick={() => isMenuOpen && setIsMenuOpen(false)}>
+                <div 
+                  ref={topicListRef}
+                  className="chat-messages" 
+                  onClick={() => isMenuOpen && setIsMenuOpen(false)}
+                >
                   {loadingTopics ? (
                     <div className="messages-loading">
                       <span className="spinner"></span> Carregando tópicos...
