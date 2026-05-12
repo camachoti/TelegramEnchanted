@@ -28,4 +28,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('media:progress', listener);
     return () => ipcRenderer.removeListener('media:progress', listener);
   },
+  selectFile: () => ipcRenderer.invoke('dialog:select-file'),
+  sendMessage: (data) => ipcRenderer.invoke('telegram:send-message', data),
+  sendMedia: (data) => ipcRenderer.invoke('telegram:send-media', data),
+  createTopic: (data) => ipcRenderer.invoke('telegram:create-topic', data),
+  sendReaction: (data) => ipcRenderer.invoke('telegram:send-reaction', data),
+  onSendProgress: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('send:progress', listener);
+    return () => ipcRenderer.removeListener('send:progress', listener);
+  },
+  readHistory: (chatId) => ipcRenderer.invoke('telegram:read-history', chatId),
 });

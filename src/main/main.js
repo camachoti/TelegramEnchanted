@@ -474,7 +474,7 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    const isDevServer = isDev && url.startsWith(process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173');
+    const isDevServer = isDev && url.startsWith(process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173');
     const isLocalFile = url.startsWith('file://');
     if (!isDevServer && !isLocalFile) {
       event.preventDefault();
@@ -491,7 +491,7 @@ function createWindow() {
   });
 
   if (isDev) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173');
+    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173');
     mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '../../dist/renderer/index.html'));
@@ -684,7 +684,17 @@ ipcMain.handle('telegram:get-dialogs', async () => {
         title: d.title,
         isGroup: d.isGroup,
         isChannel: d.isChannel,
-        hasTopics: Boolean(d.entity?.forum)
+        hasTopics: Boolean(d.entity?.forum),
+        lastMessageText: (() => {
+          const msg = d.message;
+          if (!msg) return '';
+          if (msg.message) return msg.message;
+          if (msg.media) return '📎 Mídia';
+          if (msg.action) return '🔔 Notificação';
+          return '';
+        })(),
+        lastMessageDate: d.message?.date || 0,
+        unreadCount: d.unreadCount || 0,
       }))
     };
   } catch (error) {
@@ -790,7 +800,21 @@ ipcMain.handle('telegram:get-messages', async (event, { chatId, limit = 50, offs
           mediaSize,
           date: m.date,
           out: m.out,
-          senderId: m.senderId ? m.senderId.toString() : null
+          senderId: m.senderId ? m.senderId.toString() : null,
+          senderName: (() => {
+            if (m.out) return null;
+            const s = m.sender;
+            if (!s) return null;
+            if (s.firstName || s.lastName) return [s.firstName, s.lastName].filter(Boolean).join(' ').trim();
+            return s.title || s.username || null;
+          })(),
+          reactions: (m.reactions?.results || [])
+            .filter(r => r.reaction?.emoticon)
+            .map(r => ({
+              emoji: r.reaction.emoticon,
+              count: r.count,
+              mine: r.chosenOrder !== undefined && r.chosenOrder !== null,
+            })),
         };
       }).reverse(),
       hasMore,
@@ -933,6 +957,96 @@ ipcMain.handle('telegram:stop-download', async () => {
   activeDownloadAborted = true;
   console.log('Mass download: stop requested');
   return { success: true };
+});
+
+ipcMain.handle('dialog:select-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [
+      { name: 'Media', extensions: ['jpg', 'jpeg', 'png', 'gif', 'mp4', 'mov', 'webm', 'mp3', 'ogg', 'pdf', 'zip', 'rar'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  if (result.canceled) return { success: false };
+  return { success: true, filePath: result.filePaths[0], fileName: path.basename(result.filePaths[0]) };
+});
+
+ipcMain.handle('telegram:send-message', async (event, { chatId, text, replyToId, topicId }) => {
+  try {
+    const entity = await client.getEntity(chatId);
+    const msg = await client.sendMessage(entity, {
+      message: text,
+      replyTo: replyToId || undefined,
+      topMsgId: topicId || undefined,
+    });
+    return { success: true, messageId: msg.id };
+  } catch (error) {
+    console.error('Error sending message:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('telegram:send-media', async (event, { chatId, filePath, caption, replyToId, topicId }) => {
+  try {
+    const entity = await client.getEntity(chatId);
+    const msg = await client.sendFile(entity, {
+      file: filePath,
+      caption: caption || '',
+      replyTo: replyToId || undefined,
+      topMsgId: topicId || undefined,
+      workers: 4,
+      progressCallback: (progress) => {
+        event.sender.send('send:progress', { progress: Math.round(Number(progress) * 100) });
+      }
+    });
+    return { success: true, messageId: msg.id };
+  } catch (error) {
+    console.error('Error sending media:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('telegram:create-topic', async (event, { chatId, title, iconColor }) => {
+  try {
+    const channel = utils.getInputChannel(await client.getInputEntity(chatId));
+    await client.invoke(new Api.channels.CreateForumTopic({
+      channel,
+      title,
+      iconColor: iconColor || 7322096,
+      randomId: BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)),
+    }));
+    return { success: true };
+  } catch (error) {
+    console.error('Error creating topic:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('telegram:send-reaction', async (event, { chatId, messageId, reaction }) => {
+  try {
+    const peer = await client.getInputEntity(chatId);
+    await client.invoke(new Api.messages.SendReaction({
+      peer,
+      msgId: messageId,
+      reaction: [new Api.ReactionEmoji({ emoticon: reaction })],
+    }));
+    return { success: true };
+  } catch (error) {
+    console.error('Error sending reaction:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('telegram:read-history', async (event, chatId) => {
+  try {
+    const entity = await client.getEntity(chatId);
+    // client.readHistory(entity) handles both channels and private chats
+    await client.readHistory(entity);
+    return { success: true };
+  } catch (error) {
+    console.error('Error reading history:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 // Mass download logic

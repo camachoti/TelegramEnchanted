@@ -65,7 +65,7 @@ function spawnProcess(command, args, env) {
 }
 
 const port = await findAvailablePort(requestedPort);
-const devServerUrl = `http://localhost:${port}`;
+const devServerUrl = `http://${HOST}:${port}`;
 
 console.log(`Starting Vite on ${devServerUrl}`);
 

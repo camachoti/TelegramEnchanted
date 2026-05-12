@@ -28,12 +28,17 @@
     ],
     "linux": {
       "icon": "build/icon.png",
-      "target": ["AppImage", "snap"]
+      "target": [
+        "AppImage",
+        "snap"
+      ]
     },
     "protocols": [
       {
         "name": "Telegram",
-        "schemes": ["tg"]
+        "schemes": [
+          "tg"
+        ]
       }
     ],
     "win": {
@@ -47,6 +52,7 @@
   "dependencies": {
     "dotenv": "^17.3.1",
     "env-paths": "^4.0.0",
+    "node-sqlite3-wasm": "^0.8.57",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "telegram": "^2.26.22"
@@ -57,7 +63,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
-    "electron": "^41.1.0",
+    "electron": "^32.0.0",
     "electron-builder": "^26.8.1",
     "typescript": "^5.9.3",
     "vite": "^8.0.3",
