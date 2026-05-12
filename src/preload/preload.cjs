@@ -39,4 +39,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('send:progress', listener);
   },
   readHistory: (chatId) => ipcRenderer.invoke('telegram:read-history', chatId),
+  getCacheStats: () => ipcRenderer.invoke('cache:get-stats'),
+  clearCache: () => ipcRenderer.invoke('cache:clear-all'),
+  getCacheSettings: () => ipcRenderer.invoke('cache:get-settings'),
+  setCacheSettings: (data) => ipcRenderer.invoke('cache:set-settings', data),
+  getOriginalMessage: (data) => ipcRenderer.invoke('cache:get-original-message', data),
+  getFullChat: (chatId) => ipcRenderer.invoke('telegram:get-full-chat', chatId),
+  getSharedMedia: (data) => ipcRenderer.invoke('telegram:get-shared-media', data),
 });

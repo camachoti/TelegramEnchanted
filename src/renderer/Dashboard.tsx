@@ -3,6 +3,7 @@ import './Dashboard.css';
 import { ChatAvatar } from './ChatAvatar';
 import { MessageMedia } from './MessageMedia';
 import { ContextMenu, IcoDownload, IcoCopy, IcoForward, IcoReply } from './ContextMenu';
+import { Settings } from './Settings';
 
 const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
@@ -41,6 +42,13 @@ interface Chat {
   unreadCount?: number;
 }
 
+interface ChatFullInfo {
+  about?: string;
+  participantsCount?: number;
+  username?: string;
+  pinnedMsgId?: number;
+}
+
 interface ForumTopic {
   id: number;
   title: string;
@@ -62,6 +70,8 @@ interface Message {
   isVideo: boolean;
   mediaSize?: number | null;
   reactions?: Array<{ emoji: string; count: number; mine: boolean }>;
+  is_deleted?: boolean;
+  is_edited?: boolean;
 }
 
 interface DownloadProgress {
@@ -111,6 +121,12 @@ const IconAttach = () => (
 const IconEmoji = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="9"/><path d="M8.5 14a4 4 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/>
+  </svg>
+);
+const IconSettings = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+    <circle cx="12" cy="12" r="3"/>
   </svg>
 );
 
@@ -176,10 +192,22 @@ export const Dashboard: React.FC = () => {
   const [infoOpen, setInfoOpen] = useState(false);
   const [emojiPickerMsgId, setEmojiPickerMsgId] = useState<number | null>(null);
   const [emojiPickerPos, setEmojiPickerPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [originalMsgModal, setOriginalMsgModal] = useState<{ msg: Message; original: { id: number; text: string; date: number } } | null>(null);
+  const [activeFolder, setActiveFolder] = useState<'all' | 'unread'>('all');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
+  const [fullChatInfo, setFullChatInfo] = useState<ChatFullInfo | null>(null);
+  const [loadingFullInfo, setLoadingFullInfo] = useState(false);
+  const [sharedMedia, setSharedMedia] = useState<any[]>([]);
+  const [loadingSharedMedia, setLoadingSharedMedia] = useState(false);
 
-  const filteredChats = chats.filter(chat =>
-    chat.title.toLowerCase().includes(chatSearch.trim().toLowerCase())
-  );
+  const filteredChats = chats.filter(chat => {
+    const matchesSearch = chat.title.toLowerCase().includes(chatSearch.trim().toLowerCase());
+    if (activeFolder === 'unread') {
+      return matchesSearch && (chat.unreadCount ?? 0) > 0;
+    }
+    return matchesSearch;
+  });
   const filteredTopics = forumTopics.filter(topic =>
     topic.title.toLowerCase().includes(topicSearch.trim().toLowerCase())
   );
@@ -296,7 +324,11 @@ export const Dashboard: React.FC = () => {
       setIsCreatingTopic(false);
       setNewTopicTitle('');
       setIsMenuOpen(false);
+      setFullChatInfo(null);
+      setSharedMedia([]);
       fetchForumTopics(selectedChat);
+      fetchFullChat(selectedChat.id);
+      fetchSharedMedia(selectedChat.id);
       if (!selectedChat.hasTopics) loadMessages(selectedChat.id);
       else topicListScrollRef.current = 0;
     } else {
@@ -350,6 +382,14 @@ export const Dashboard: React.FC = () => {
     }
   }, [isMenuOpen]);
 
+  useEffect(() => {
+    const handleClickOutside = () => setIsSettingsMenuOpen(false);
+    if (isSettingsMenuOpen) {
+      setTimeout(() => document.addEventListener('click', handleClickOutside), 0);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [isSettingsMenuOpen]);
+
   const fetchDialogs = async () => {
     try {
       const res = await window.electronAPI.getDialogs();
@@ -360,6 +400,15 @@ export const Dashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchSharedMedia = async (chatId: string) => {
+    setLoadingSharedMedia(true);
+    try {
+      const res = await window.electronAPI.getSharedMedia({ chatId, limit: 12 });
+      if (res.success) setSharedMedia(res.media);
+    } catch (e) { console.error(e); }
+    finally { setLoadingSharedMedia(false); }
   };
 
   const fetchForumTopics = async (chat: Chat) => {
@@ -374,6 +423,15 @@ export const Dashboard: React.FC = () => {
     } finally {
       setLoadingTopics(false);
     }
+  };
+
+  const fetchFullChat = async (chatId: string) => {
+    setLoadingFullInfo(true);
+    try {
+      const res = await window.electronAPI.getFullChat(chatId);
+      if (res.success) setFullChatInfo(res.fullInfo);
+    } catch (e) { console.error(e); }
+    finally { setLoadingFullInfo(false); }
   };
 
   const handleSelectTopic = (topic: ForumTopic) => {
@@ -495,9 +553,16 @@ export const Dashboard: React.FC = () => {
     } catch (e: any) { setError(e.message || 'Erro ao criar tópico'); }
   };
 
-  const cyclePalette = useCallback(() => {
-    setPalette(p => PALETTES[(PALETTES.indexOf(p) + 1) % PALETTES.length]);
-  }, []);
+
+
+  const handleViewOriginalMessage = async (msg: Message) => {
+    if (!selectedChat) return;
+    const res = await window.electronAPI.getOriginalMessage({ chatId: selectedChat.id, messageId: msg.id });
+    if (res.success && res.message) {
+      setOriginalMsgModal({ msg, original: res.message });
+      setMsgContextMenu(null);
+    }
+  };
 
   const handleReact = useCallback(async (msg: Message, emoji: string) => {
     setEmojiPickerMsgId(null);
@@ -559,9 +624,19 @@ export const Dashboard: React.FC = () => {
           </div>
 
           <div className="folders">
-            <div className="folder active">
+            <div 
+              className={`folder ${activeFolder === 'all' ? 'active' : ''}`}
+              onClick={() => setActiveFolder('all')}
+            >
               Todos
-              <span className="count">{filteredChats.length}</span>
+              <span className="count">{chats.length}</span>
+            </div>
+            <div 
+              className={`folder ${activeFolder === 'unread' ? 'active' : ''}`}
+              onClick={() => setActiveFolder('unread')}
+            >
+              Não lidos
+              <span className="count">{chats.filter(c => (c.unreadCount ?? 0) > 0).length}</span>
             </div>
           </div>
 
@@ -624,12 +699,34 @@ export const Dashboard: React.FC = () => {
               <div className="name">Você</div>
               <div className="sub"><span className="pip-dot" style={{ background: 'var(--good)', marginRight: 4 }} />online</div>
             </div>
-            <div className="user-card-actions">
-              <button className="icon-btn" onClick={cyclePalette} title="Mudar paleta">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/>
-                </svg>
+            <div className="user-card-actions" style={{ position: 'relative' }}>
+              <button 
+                className={`icon-btn ${isSettingsMenuOpen ? 'active' : ''}`} 
+                onClick={e => { e.stopPropagation(); setIsSettingsMenuOpen(v => !v); }} 
+                title="Configurações e Aparência"
+              >
+                <IconSettings />
               </button>
+              {isSettingsMenuOpen && (
+                <div className="dropdown-menu" style={{ bottom: 'calc(100% + 8px)', top: 'auto', right: 0 }} onClick={e => e.stopPropagation()}>
+                  <div className="dropdown-item" onClick={() => { setIsSettingsOpen(true); setIsSettingsMenuOpen(false); }}>
+                    ⚙️ Configurações de Cache
+                  </div>
+                  <div className="dropdown-divider" />
+                  <div style={{ padding: '6px 12px 4px', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Paleta</div>
+                  <div className="palette-picker">
+                    {PALETTES.map(p => (
+                      <button key={p} className={`palette-dot ${p} ${palette === p ? 'active' : ''}`} onClick={() => setPalette(p)} title={p} />
+                    ))}
+                  </div>
+                  <div style={{ padding: '2px 12px 4px', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Densidade</div>
+                  <div className="density-row">
+                    {DENSITIES.map(d => (
+                      <button key={d} className={`density-btn ${density === d ? 'active' : ''}`} onClick={() => setDensity(d)}>{d}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -685,19 +782,6 @@ export const Dashboard: React.FC = () => {
                       <div className="dropdown-menu" onClick={e => e.stopPropagation()}>
                         <div className="dropdown-item" onClick={() => { setIsDownloadModalOpen(v => !v); setIsMenuOpen(false); }}>
                           🪄 Mass Download
-                        </div>
-                        <div className="dropdown-divider" />
-                        <div style={{ padding: '6px 12px 4px', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Paleta</div>
-                        <div className="palette-picker">
-                          {PALETTES.map(p => (
-                            <button key={p} className={`palette-dot ${p} ${palette === p ? 'active' : ''}`} onClick={() => setPalette(p)} title={p} />
-                          ))}
-                        </div>
-                        <div style={{ padding: '2px 12px 4px', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Densidade</div>
-                        <div className="density-row">
-                          {DENSITIES.map(d => (
-                            <button key={d} className={`density-btn ${density === d ? 'active' : ''}`} onClick={() => setDensity(d)}>{d}</button>
-                          ))}
                         </div>
                       </div>
                     )}
@@ -901,8 +985,9 @@ export const Dashboard: React.FC = () => {
                               </div>
                             )}
                             <div
-                              className={`msg-row ${msg.out ? 'self' : ''} ${continued ? 'continued' : ''}`}
+                              className={`msg-row ${msg.out ? 'self' : ''} ${continued ? 'continued' : ''}${msg.is_deleted ? ' msg-deleted' : ''}`}
                               onClick={() => setEmojiPickerMsgId(null)}
+                              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMsgContextMenu({ x: e.clientX, y: e.clientY, message: msg }); }}
                             >
                               <div className={`msg-avatar color-${color}`}>
                                 {initials}
@@ -911,10 +996,18 @@ export const Dashboard: React.FC = () => {
                                 {!continued && (
                                   <div className="msg-head">
                                     <span className={`msg-from color-${color}`}>{displayName}</span>
-                                    <span className="msg-time">{formatMessageTime(msg.date)}</span>
+                                    <span className="msg-time">
+                                      {formatMessageTime(msg.date)}
+                                      {msg.is_edited && <span className="msg-edited-badge">(editado)</span>}
+                                    </span>
                                   </div>
                                 )}
-                                {continued && <div className="msg-time-inline">{formatMessageTime(msg.date)}</div>}
+                                {continued && (
+                                  <div className="msg-time-inline">
+                                    {formatMessageTime(msg.date)}
+                                    {msg.is_edited && <span className="msg-edited-badge">(editado)</span>}
+                                  </div>
+                                )}
                                 {msg.hasMedia && (
                                   <div
                                     className="msg-media"
@@ -928,6 +1021,9 @@ export const Dashboard: React.FC = () => {
                                   </div>
                                 )}
                                 {msg.text && <div className="msg-text">{linkifyText(msg.text)}</div>}
+                                {msg.is_deleted && (
+                                  <div className="msg-deleted-badge">🗑️ Mensagem excluída no servidor</div>
+                                )}
                                 {msg.reactions && msg.reactions.length > 0 && (
                                   <div className="reactions">
                                     {msg.reactions.map((r, i) => (
@@ -1075,13 +1171,74 @@ export const Dashboard: React.FC = () => {
                 <div className="info-name">{selectedChat.title}</div>
                 <div className="info-sub">{getChatKind(selectedChat)}{selectedChat.hasTopics ? ' · fórum' : ''}</div>
               </div>
+
+              {fullChatInfo?.about && (
+                <div className="info-section">
+                  <h3>Bio / Descrição</h3>
+                  <div style={{ fontSize: 13, color: 'var(--text-1)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                    {fullChatInfo.about}
+                  </div>
+                </div>
+              )}
+
               <div className="info-section">
                 <h3>Detalhes</h3>
-                <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
-                  <div>ID: {selectedChat.id}</div>
-                  <div style={{ marginTop: 6 }}>{messages.length} mensagens carregadas</div>
-                  {selectedChat.hasTopics && <div style={{ marginTop: 6 }}>{forumTopics.length} tópicos</div>}
+                <div className="info-stats-grid">
+                  <div className="info-stat">
+                    <span className="info-stat-value">
+                      {loadingFullInfo ? '...' : fullChatInfo?.participantsCount?.toLocaleString() || '0'}
+                    </span>
+                    <span className="info-stat-label">Membros</span>
+                  </div>
+                  <div className="info-stat">
+                    <span className="info-stat-value">{messages.length}</span>
+                    <span className="info-stat-label">Mensagens</span>
+                  </div>
                 </div>
+                
+                <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div className="info-field">
+                    <span className="info-field-label">ID</span>
+                    <span className="info-field-value">{selectedChat.id}</span>
+                  </div>
+                  {fullChatInfo?.username && (
+                    <div className="info-field">
+                      <span className="info-field-label">Username</span>
+                      <span className="info-field-value" style={{ color: 'var(--accent)' }}>@{fullChatInfo.username}</span>
+                    </div>
+                  )}
+                  {selectedChat.hasTopics && (
+                    <div className="info-field">
+                      <span className="info-field-label">Tópicos</span>
+                      <span className="info-field-value">{forumTopics.length}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="info-section">
+                <h3>Mídia Compartilhada</h3>
+                {loadingSharedMedia ? (
+                  <div style={{ padding: '20px 0', textAlign: 'center' }}><span className="spinner small-spinner" /></div>
+                ) : sharedMedia.length > 0 ? (
+                  <div className="info-media-grid">
+                    {sharedMedia.map(m => (
+                      <div key={m.id} className="info-media-item">
+                        <MessageMedia
+                          chatId={selectedChat.id}
+                          messageId={m.id}
+                          isVideo={m.isVideo}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="info-media-grid-preview">
+                    <div style={{ padding: '20px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 12, border: '1px dashed var(--line-soft)', borderRadius: 8 }}>
+                      Nenhuma mídia encontrada
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -1097,17 +1254,41 @@ export const Dashboard: React.FC = () => {
             {
               label: 'Responder',
               icon: <IcoReply />,
-              onClick: () => setReplyTo(msgContextMenu.message),
+              onClick: () => { setReplyTo(msgContextMenu.message); setMsgContextMenu(null); },
             },
             ...(msgContextMenu.message.text ? [{
               label: 'Copiar texto',
               icon: <IcoCopy />,
-              onClick: () => navigator.clipboard.writeText(msgContextMenu.message.text),
+              onClick: () => { navigator.clipboard.writeText(msgContextMenu.message.text); setMsgContextMenu(null); },
+            }] : []),
+            ...(msgContextMenu.message.is_edited ? [{ separator: true as const }] : []),
+            ...(msgContextMenu.message.is_edited ? [{
+              label: 'Ver mensagem original',
+              icon: <span style={{ fontSize: 14 }}>🕐</span>,
+              onClick: () => handleViewOriginalMessage(msgContextMenu.message),
             }] : []),
           ]}
           onClose={() => setMsgContextMenu(null)}
         />
       )}
+      {originalMsgModal && (
+        <div className="original-msg-modal-overlay" onClick={() => setOriginalMsgModal(null)}>
+          <div className="original-msg-modal" onClick={e => e.stopPropagation()}>
+            <div className="original-msg-modal-header">
+              <h3>Mensagem original</h3>
+              <button className="icon-btn" onClick={() => setOriginalMsgModal(null)}>✕</button>
+            </div>
+            <div className="original-msg-modal-body">
+              <div className="original-msg-label">Versão original</div>
+              <div className="original-msg-text">{originalMsgModal.original.text || '(sem texto)'}</div>
+              <div className="original-msg-divider" />
+              <div className="original-msg-label">Versão atual</div>
+              <div className="original-msg-text">{originalMsgModal.msg.text || '(sem texto)'}</div>
+            </div>
+          </div>
+        </div>
+      )}
+      {isSettingsOpen && <Settings onClose={() => setIsSettingsOpen(false)} />}
       {emojiPickerMsgId !== null && (() => {
         const pickerMsg = messages.find(m => m.id === emojiPickerMsgId);
         if (!pickerMsg) return null;

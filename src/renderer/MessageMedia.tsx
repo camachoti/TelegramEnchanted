@@ -228,12 +228,13 @@ export const MessageMedia: React.FC<Props> = ({ chatId, messageId, isVideo, medi
             <div className="media-lightbox-toolbar" onClick={event => event.stopPropagation()}>
               <button
                 type="button"
-                className="btn btn-secondary"
+                className="btn-icon"
                 onClick={handleSaveMedia}
                 disabled={savingMedia}
-                aria-label="Salvar midia"
+                title={savingMedia ? 'Salvando...' : 'Download'}
+                aria-label="Salvar mídia"
               >
-                {savingMedia ? 'Salvando...' : 'Download'}
+                {savingMedia ? <span className="spinner small-spinner"></span> : '⤓'}
               </button>
               <button
                 type="button"

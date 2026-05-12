@@ -12,7 +12,7 @@ declare global {
       resolveLink: (url: string) => Promise<{ success: boolean; chat?: { id: string; title: string; isGroup: boolean; isChannel: boolean; hasTopics?: boolean }; error?: string }>;
       openExternal: (url: string) => Promise<void>;
       onDeepLink: (callback: (url: string) => void) => void;
-      getMessages: (data: { chatId: string; limit?: number; offsetId?: number; topicId?: number }) => Promise<{ success: boolean; messages?: Array<{ id: number; text: string; date: number; out: boolean; senderId: string | null; senderName?: string | null; hasMedia: boolean; isPhoto: boolean; isVideo: boolean; reactions?: Array<{ emoji: string; count: number; mine: boolean }> }>; hasMore?: boolean; oldestMessageId?: number | null; error?: string }>;
+      getMessages: (data: { chatId: string; limit?: number; offsetId?: number; topicId?: number }) => Promise<{ success: boolean; messages?: Array<{ id: number; text: string; date: number; out: boolean; senderId: string | null; senderName?: string | null; hasMedia: boolean; isPhoto: boolean; isVideo: boolean; reactions?: Array<{ emoji: string; count: number; mine: boolean }>; is_deleted?: boolean; is_edited?: boolean }>; hasMore?: boolean; oldestMessageId?: number | null; error?: string }>;
       getMessageMedia: (data: { chatId: string; messageId: number }) => Promise<{ success: boolean; base64?: string; mimeType?: string; error?: string }>;
       getMessageMediaFile: (data: { chatId: string; messageId: number }) => Promise<{ success: boolean; base64?: string; mimeType?: string; error?: string }>;
       getMessageMediaStream: (data: { chatId: string; messageId: number }) => Promise<{ success: boolean; streamUrl?: string; mimeType?: string; error?: string }>;
@@ -29,6 +29,11 @@ declare global {
       sendReaction(data: { chatId: string; messageId: number; reaction: string }): Promise<{ success: boolean; error?: string }>;
       onSendProgress(callback: (data: { progress: number }) => void): () => void;
       readHistory(chatId: string): Promise<{ success: boolean; error?: string }>;
+      getCacheStats(): Promise<{ success: boolean; totalSize: number; messageCount: number; mediaCount: number; avatarCount: number }>;
+      clearCache(): Promise<{ success: boolean; error?: string }>;
+      getCacheSettings(): Promise<{ success: boolean; maxCacheSize: number; avatarRefreshHours: number }>;
+      setCacheSettings(data: { maxCacheSize?: number; avatarRefreshHours?: number }): Promise<{ success: boolean; error?: string }>;
+      getOriginalMessage(data: { chatId: string; messageId: number }): Promise<{ success: boolean; message?: { id: number; text: string; date: number; out: boolean; senderId: string | null; senderName?: string | null; hasMedia: boolean; isPhoto: boolean; isVideo: boolean }; error?: string }>;
     };
   }
 }

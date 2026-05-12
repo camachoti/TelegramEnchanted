@@ -7,6 +7,7 @@ import { StringSession } from 'telegram/sessions/index.js';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
 import fs from 'fs';
+import { CacheManager } from './cache.js';
 
 dotenv.config();
 
@@ -20,6 +21,7 @@ let client;
 let mediaStreamServer;
 let mediaStreamBaseUrl = '';
 let activeDownloadAborted = false;
+let cache;
 
 // Load existing session if available
 const SESSION_FILE = path.join(app.getPath('userData'), 'telegram_session.txt');
@@ -516,6 +518,7 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(async () => {
+    cache = new CacheManager(app.getPath('userData'));
     await startMediaStreamServer();
     createWindow();
 
@@ -538,6 +541,7 @@ app.on('window-all-closed', () => {
     if (mediaStreamServer) {
       mediaStreamServer.close();
     }
+    if (cache) cache.close();
     app.quit();
   }
 });
@@ -758,65 +762,102 @@ ipcMain.handle('telegram:get-forum-topics', async (event, chatId) => {
   }
 });
 
-// Get chat avatar
+// Get chat avatar — cache-first with background refresh
 ipcMain.handle('telegram:get-avatar', async (event, chatId) => {
   try {
+    // Try cache first
+    if (cache) {
+      const cached = cache.getCachedAvatar(chatId);
+      if (cached) {
+        const base64 = fs.readFileSync(cached.filePath).toString('base64');
+        if (cached.needsRefresh) {
+          // Return cached immediately, refresh in background
+          client.getEntity(chatId)
+            .then(entity => client.downloadProfilePhoto(entity, { isBig: false }))
+            .then(buffer => { if (buffer?.length) cache.cacheAvatar(chatId, buffer); })
+            .catch(() => {});
+        }
+        return { success: true, base64 };
+      }
+    }
+
     const entity = await client.getEntity(chatId);
     const buffer = await client.downloadProfilePhoto(entity, { isBig: false });
     if (buffer && buffer.length > 0) {
+      if (cache) cache.cacheAvatar(chatId, buffer);
       return { success: true, base64: buffer.toString('base64') };
     }
     return { success: false };
   } catch (error) {
-    // Expected for deleted accounts or chats without avatars
     return { success: false };
   }
 });
 
-// Get chat messages (for preview)
+// Get chat messages (for preview) — cache after fetch, enrich with delete/edit flags
 ipcMain.handle('telegram:get-messages', async (event, { chatId, limit = 50, offsetId = 0, topicId }) => {
   try {
     const entity = await client.getEntity(chatId);
     const replyTo = topicId ? topicId : undefined;
     const { messages, hasMore, oldestMessageId } = await getVisibleMessagesPage(entity, limit, offsetId, replyTo);
-    
+
+    const mapped = messages.map(m => {
+      let mediaSize = null;
+      if (m.document && m.document.size) {
+          mediaSize = Number(m.document.size);
+      } else if (m.photo && m.photo.sizes && m.photo.sizes.length > 0) {
+          const biggest = m.photo.sizes[m.photo.sizes.length - 1];
+          if (biggest && biggest.size) mediaSize = Number(biggest.size);
+      }
+
+      return {
+        id: m.id,
+        text: m.message || '',
+        hasMedia: !!m.media,
+        isPhoto: !!m.photo,
+        isVideo: !!m.video || (m.document && m.document.mimeType && m.document.mimeType.startsWith('video/')),
+        mediaSize,
+        date: m.date,
+        out: m.out,
+        senderId: m.senderId ? m.senderId.toString() : null,
+        senderName: (() => {
+          if (m.out) return null;
+          const s = m.sender;
+          if (!s) return null;
+          if (s.firstName || s.lastName) return [s.firstName, s.lastName].filter(Boolean).join(' ').trim();
+          return s.title || s.username || null;
+        })(),
+        reactions: (m.reactions?.results || [])
+          .filter(r => r.reaction?.emoticon)
+          .map(r => ({
+            emoji: r.reaction.emoticon,
+            count: r.count,
+            mine: r.chosenOrder !== undefined && r.chosenOrder !== null,
+          })),
+      };
+    });
+
+    // Persist to cache and enrich with is_deleted / is_edited
+    if (cache) {
+      cache.cacheMessages(chatId, topicId ?? null, mapped);
+      const freshIds = mapped.map(m => m.id);
+      if (offsetId === 0 && freshIds.length > 0) {
+        cache.markMissingAsDeleted(chatId, freshIds);
+      }
+    }
+
+    // Enrich renderer objects with cache flags
+    const enriched = mapped.map(m => {
+      if (!cache) return m;
+      const row = cache['_db'].get(
+        `SELECT is_deleted, is_edited FROM messages WHERE chat_id=? AND id=?`,
+        [chatId, m.id]
+      );
+      return { ...m, is_deleted: !!(row?.is_deleted), is_edited: !!(row?.is_edited) };
+    });
+
     return {
       success: true,
-      messages: messages.map(m => {
-        let mediaSize = null;
-        if (m.document && m.document.size) {
-            mediaSize = Number(m.document.size);
-        } else if (m.photo && m.photo.sizes && m.photo.sizes.length > 0) {
-            const biggest = m.photo.sizes[m.photo.sizes.length - 1];
-            if (biggest && biggest.size) mediaSize = Number(biggest.size);
-        }
-
-        return {
-          id: m.id,
-          text: m.message || '',
-          hasMedia: !!m.media,
-          isPhoto: !!m.photo,
-          isVideo: !!m.video || (m.document && m.document.mimeType && m.document.mimeType.startsWith('video/')),
-          mediaSize,
-          date: m.date,
-          out: m.out,
-          senderId: m.senderId ? m.senderId.toString() : null,
-          senderName: (() => {
-            if (m.out) return null;
-            const s = m.sender;
-            if (!s) return null;
-            if (s.firstName || s.lastName) return [s.firstName, s.lastName].filter(Boolean).join(' ').trim();
-            return s.title || s.username || null;
-          })(),
-          reactions: (m.reactions?.results || [])
-            .filter(r => r.reaction?.emoticon)
-            .map(r => ({
-              emoji: r.reaction.emoticon,
-              count: r.count,
-              mine: r.chosenOrder !== undefined && r.chosenOrder !== null,
-            })),
-        };
-      }).reverse(),
+      messages: enriched.reverse(),
       hasMore,
       oldestMessageId
     };
@@ -826,9 +867,18 @@ ipcMain.handle('telegram:get-messages', async (event, { chatId, limit = 50, offs
   }
 });
 
-// Get media thumbnail for chat preview
+// Get media thumbnail — cache-first
 ipcMain.handle('telegram:get-message-media', async (event, { chatId, messageId }) => {
   try {
+    // Check cache first
+    if (cache) {
+      const cached = cache.getCachedMedia(chatId, messageId, 'thumbnail');
+      if (cached) {
+        const base64 = fs.readFileSync(cached.filePath).toString('base64');
+        return { success: true, base64, mimeType: cached.mimeType || 'image/jpeg' };
+      }
+    }
+
     const entity = await client.getEntity(chatId);
     const result = await client.getMessages(entity, { ids: [messageId] });
     const message = getFirstFetchedMessage(result);
@@ -839,11 +889,8 @@ ipcMain.handle('telegram:get-message-media', async (event, { chatId, messageId }
       const buffer = await downloadPreviewMedia(message, isPlayableVideo);
 
       if (buffer) {
-        return {
-          success: true,
-          base64: buffer.toString('base64'),
-          mimeType
-        };
+        if (cache) cache.cacheMediaFile(chatId, messageId, 'thumbnail', buffer, mimeType || 'image/jpeg');
+        return { success: true, base64: buffer.toString('base64'), mimeType };
       }
     }
     return { success: false, error: 'No media' };
@@ -853,8 +900,18 @@ ipcMain.handle('telegram:get-message-media', async (event, { chatId, messageId }
   }
 });
 
+// Get full photo — cache-first
 ipcMain.handle('telegram:get-message-media-file', async (event, { chatId, messageId }) => {
   try {
+    if (cache) {
+      const cached = cache.getCachedMedia(chatId, messageId, 'photo');
+      if (cached) {
+        const base64 = fs.readFileSync(cached.filePath).toString('base64');
+        emitMediaProgress(chatId, messageId, 1, 1, 'downloading');
+        return { success: true, base64, mimeType: cached.mimeType };
+      }
+    }
+
     const entity = await client.getEntity(chatId);
     const result = await client.getMessages(entity, { ids: [messageId] });
     const message = getFirstFetchedMessage(result);
@@ -869,12 +926,9 @@ ipcMain.handle('telegram:get-message-media-file', async (event, { chatId, messag
       });
 
       if (buffer) {
+        if (cache) cache.cacheMediaFile(chatId, messageId, 'photo', buffer, mimeType);
         emitMediaProgress(chatId, messageId, 1, 1, 'downloading');
-        return {
-          success: true,
-          base64: buffer.toString('base64'),
-          mimeType
-        };
+        return { success: true, base64: buffer.toString('base64'), mimeType };
       }
     }
 
@@ -928,9 +982,57 @@ ipcMain.handle('telegram:save-message-media-file', async (event, { chatId, messa
   }
 });
 
+// Video stream — serve from cache if available
 ipcMain.handle('telegram:get-message-media-stream', async (event, { chatId, messageId }) => {
   try {
+    // Check video cache
+    if (cache) {
+      const cached = cache.getCachedMedia(chatId, messageId, 'video');
+      if (cached) {
+        // Serve from cached file via stream server
+        const token = crypto.randomUUID();
+        const mimeType = cached.mimeType || 'video/mp4';
+        const fileSize = fs.statSync(cached.filePath).size;
+        const streamKey = `${chatId}:${messageId}`;
+        const streamState = {
+          token,
+          filePath: cached.filePath,
+          mimeType,
+          totalBytes: fileSize,
+          completed: true,
+          error: null,
+          lastAccessAt: Date.now(),
+          streamKey
+        };
+        mediaStreams.set(streamKey, streamState);
+        return { success: true, streamUrl: `${mediaStreamBaseUrl}/media/${token}`, mimeType };
+      }
+    }
+
     const streamState = await ensureVideoStream(chatId, messageId);
+    // After stream completes, register in cache
+    if (cache) {
+      const onComplete = () => {
+        if (streamState.completed && fs.existsSync(streamState.filePath)) {
+          try {
+            const buffer = fs.readFileSync(streamState.filePath);
+            cache.cacheMediaFile(chatId, messageId, 'video', buffer, streamState.mimeType);
+          } catch (_) {}
+        }
+      };
+      if (streamState.completed) {
+        onComplete();
+      } else {
+        // Poll for completion
+        const interval = setInterval(() => {
+          if (streamState.completed || streamState.error) {
+            clearInterval(interval);
+            onComplete();
+          }
+        }, 2000);
+      }
+    }
+
     return {
       success: true,
       streamUrl: `${mediaStreamBaseUrl}/media/${streamState.token}`,
@@ -950,6 +1052,59 @@ ipcMain.handle('dialog:select-folder', async () => {
     return { success: false, error: "Canceled" };
   } else {
     return { success: true, folderPath: result.filePaths[0] };
+  }
+});
+
+// ── Cache management IPC handlers ───────────────────────────────────────────
+
+ipcMain.handle('cache:get-stats', async () => {
+  try {
+    const stats = cache ? cache.getCacheStats() : { totalSize: 0, messageCount: 0, mediaCount: 0, avatarCount: 0 };
+    return { success: true, ...stats };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('cache:clear-all', async () => {
+  try {
+    if (cache) cache.clearAllCache();
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('cache:get-settings', async () => {
+  try {
+    const maxCacheSize = parseInt(cache?.getSetting('max_cache_size') ?? '0', 10);
+    const avatarRefreshHours = parseInt(cache?.getSetting('avatar_refresh_hours') ?? '24', 10);
+    return { success: true, maxCacheSize, avatarRefreshHours };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('cache:set-settings', async (event, { maxCacheSize, avatarRefreshHours }) => {
+  try {
+    if (cache) {
+      if (maxCacheSize !== undefined) cache.setSetting('max_cache_size', String(maxCacheSize));
+      if (avatarRefreshHours !== undefined) cache.setSetting('avatar_refresh_hours', String(avatarRefreshHours));
+    }
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('cache:get-original-message', async (event, { chatId, messageId }) => {
+  try {
+    if (!cache) return { success: false, error: 'Cache not initialized' };
+    const msg = cache.getOriginalMessage(chatId, messageId);
+    if (!msg) return { success: false, error: 'No original message in cache' };
+    return { success: true, message: msg };
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 });
 
@@ -1242,3 +1397,58 @@ ipcMain.handle('telegram:start-download', async (event, { chatId, folderPath, to
     return { success: false, error: error.message };
   }
 });
+ipcMain.handle('telegram:get-full-chat', async (event, chatId) => {
+  try {
+    const entity = await client.getEntity(chatId);
+    let fullChat;
+    
+    if (entity.className === 'Channel' || entity.className === 'Chat') {
+      const result = await client.invoke(
+        entity.className === 'Channel' 
+          ? new Api.channels.GetFullChannel({ channel: entity })
+          : new Api.messages.GetFullChat({ chatId: entity.id })
+      );
+      fullChat = result.fullChat;
+    } else {
+      const result = await client.invoke(new Api.users.GetFullUser({ id: entity }));
+      fullChat = result.fullUser;
+    }
+
+    return {
+      success: true,
+      fullInfo: {
+        about: fullChat.about || '',
+        participantsCount: fullChat.participantsCount || (entity.participantsCount) || 0,
+        username: entity.username || null,
+        pinnedMsgId: fullChat.pinnedMsgId || null,
+      }
+    };
+  } catch (error) {
+    console.error('Error getting full chat info:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('telegram:get-shared-media', async (event, { chatId, limit = 12 }) => {
+  try {
+    const entity = await client.getEntity(chatId);
+    const result = await client.getMessages(entity, {
+      filter: new Api.InputMessagesFilterPhotoVideo(),
+      limit
+    });
+
+    const media = result.map(m => ({
+      id: m.id,
+      hasMedia: !!m.media,
+      isPhoto: !!m.photo,
+      isVideo: !!m.video || (m.document && m.document.mimeType?.startsWith('video/')),
+      date: m.date,
+    }));
+
+    return { success: true, media };
+  } catch (error) {
+    console.error('Error getting shared media:', error);
+    return { success: false, error: error.message };
+  }
+});
+
