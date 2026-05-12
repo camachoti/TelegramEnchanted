@@ -129,6 +129,40 @@ const IconSettings = () => (
     <circle cx="12" cy="12" r="3"/>
   </svg>
 );
+const IconCheck = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20 6 9 17l-5-5"/>
+  </svg>
+);
+const IconBell = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9m4.35 13a2 2 0 0 0 3.3 0"/>
+  </svg>
+);
+const IconLogOut = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4m7 14 5-5-5-5m5 5H9"/>
+  </svg>
+);
+const IconTrash = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 6h18m-2 0v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6m3 0V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+  </svg>
+);
+const IconMagic = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m12 3 1.912 4.913L19 9l-5.088 1.087L12 15l-1.912-4.913L5 9l5.088-1.087L12 3Z"/>
+    <path d="m5 3 1 2.5L8.5 4l-1.5 1 1 2.5L5.5 6 4 8.5 5 6 2.5 5 5 4 4 1.5 5 3Z"/>
+    <path d="m19 15.5 1 2.5 2.5-1.5-1.5 1 1 2.5-2.5-1.5-1.5 2.5 1-2.5-2.5-1.5 2.5-1-1-2.5 1 2.5Z"/>
+  </svg>
+);
+const IconDownload = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="7 10 12 15 17 10"/>
+    <line x1="12" x2="12" y1="15" y2="3"/>
+  </svg>
+);
 
 const topicColors = [
   '#5ca9e6, #7d95ff',
@@ -182,6 +216,7 @@ export const Dashboard: React.FC = () => {
   const [sendProgress, setSendProgress] = useState<number | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [msgContextMenu, setMsgContextMenu] = useState<{ x: number; y: number; message: Message } | null>(null);
+  const [chatContextMenu, setChatContextMenu] = useState<{ x: number; y: number; chat: Chat } | null>(null);
   const [imgContextMenu, setImgContextMenu] = useState<{ x: number; y: number; msg: Message } | null>(null);
   const [isCreatingTopic, setIsCreatingTopic] = useState(false);
   const [newTopicTitle, setNewTopicTitle] = useState('');
@@ -200,6 +235,12 @@ export const Dashboard: React.FC = () => {
   const [loadingFullInfo, setLoadingFullInfo] = useState(false);
   const [sharedMedia, setSharedMedia] = useState<any[]>([]);
   const [loadingSharedMedia, setLoadingSharedMedia] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string;
+    body: string;
+    danger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
 
   const filteredChats = chats.filter(chat => {
     const matchesSearch = chat.title.toLowerCase().includes(chatSearch.trim().toLowerCase());
@@ -321,6 +362,7 @@ export const Dashboard: React.FC = () => {
       setSelectedFile(null);
       setSendProgress(null);
       setMsgContextMenu(null);
+      setChatContextMenu(null);
       setIsCreatingTopic(false);
       setNewTopicTitle('');
       setIsMenuOpen(false);
@@ -662,6 +704,10 @@ export const Dashboard: React.FC = () => {
                       setChats(prev => prev.map(c => c.id === chat.id ? { ...c, unreadCount: 0 } : c));
                     }
                   }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setChatContextMenu({ x: e.clientX, y: e.clientY, chat });
+                  }}
                 >
                   <div className={`chat-avatar color-${color}`}>
                     <ChatAvatar chatId={chat.id} title={chat.title} />
@@ -781,7 +827,8 @@ export const Dashboard: React.FC = () => {
                     {isMenuOpen && (
                       <div className="dropdown-menu" onClick={e => e.stopPropagation()}>
                         <div className="dropdown-item" onClick={() => { setIsDownloadModalOpen(v => !v); setIsMenuOpen(false); }}>
-                          🪄 Mass Download
+                          <IconMagic />
+                          <span>Mass Download</span>
                         </div>
                       </div>
                     )}
@@ -1246,6 +1293,79 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {/* Context menu portal */}
+      {chatContextMenu && (
+        <ContextMenu
+          x={chatContextMenu.x}
+          y={chatContextMenu.y}
+          items={[
+            {
+              label: 'Ver informações',
+              icon: <IconPanel />,
+              onClick: () => { 
+                setSelectedChat(chatContextMenu.chat);
+                setInfoOpen(true);
+                setChatContextMenu(null);
+              },
+            },
+            {
+              label: 'Marcar como lida',
+              icon: <IconCheck />,
+              onClick: async () => {
+                const chatId = chatContextMenu.chat.id;
+                await window.electronAPI.readHistory(chatId);
+                setChats(prev => prev.map(c => c.id === chatId ? { ...c, unreadCount: 0 } : c));
+                setChatContextMenu(null);
+              },
+              disabled: (chatContextMenu.chat.unreadCount ?? 0) === 0
+            },
+            {
+              label: 'Silenciar notificações',
+              icon: <IconBell />,
+              onClick: async () => {
+                const res = await window.electronAPI.muteChat({ chatId: chatContextMenu.chat.id });
+                if (res.success) {
+                  // Optionally show a toast or feedback
+                }
+                setChatContextMenu(null);
+              },
+            },
+            { separator: true },
+            {
+              label: 'Sair do grupo',
+              icon: <IconLogOut />,
+              onClick: () => {
+                const chat = chatContextMenu.chat;
+                setChatContextMenu(null);
+                setConfirmModal({
+                  title: 'Sair do grupo',
+                  body: `Tem certeza que deseja sair de "${chat.title}"? Você não poderá mais receber mensagens deste grupo.`,
+                  danger: true,
+                  onConfirm: async () => {
+                    const res = await window.electronAPI.leaveChat(chat.id);
+                    if (res.success) {
+                      setChats(prev => prev.filter(c => c.id !== chat.id));
+                      if (selectedChat?.id === chat.id) setSelectedChat(null);
+                      setConfirmModal(null);
+                    } else {
+                      setConfirmModal(prev => prev ? { ...prev, body: `Erro: ${res.error || 'Não foi possível sair do grupo.'}` } : null);
+                    }
+                  }
+                });
+              },
+              disabled: !chatContextMenu.chat.isGroup && !chatContextMenu.chat.isChannel
+            },
+            {
+              label: 'Limpar histórico',
+              icon: <IconTrash />,
+              onClick: () => { 
+                setChatContextMenu(null); 
+              },
+              disabled: true
+            },
+          ]}
+          onClose={() => setChatContextMenu(null)}
+        />
+      )}
       {msgContextMenu && (
         <ContextMenu
           x={msgContextMenu.x}
@@ -1289,6 +1409,31 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
       {isSettingsOpen && <Settings onClose={() => setIsSettingsOpen(false)} />}
+      {confirmModal && (
+        <div className="confirm-modal-overlay" onClick={() => setConfirmModal(null)}>
+          <div className="confirm-modal" onClick={e => e.stopPropagation()}>
+            <div className="confirm-modal-header">
+              {confirmModal.danger ? <IconLogOut /> : <IconPanel />}
+              <h3>{confirmModal.title}</h3>
+            </div>
+            <div className="confirm-modal-body">
+              <p>{confirmModal.body}</p>
+            </div>
+            <div className="confirm-modal-footer">
+              <button className="confirm-modal-cancel" onClick={() => setConfirmModal(null)}>
+                Cancelar
+              </button>
+              <button
+                className={`confirm-modal-confirm ${confirmModal.danger ? 'danger' : ''}`}
+                onClick={confirmModal.onConfirm}
+              >
+                {confirmModal.danger ? 'Sair' : 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {emojiPickerMsgId !== null && (() => {
         const pickerMsg = messages.find(m => m.id === emojiPickerMsgId);
         if (!pickerMsg) return null;
@@ -1313,7 +1458,7 @@ export const Dashboard: React.FC = () => {
           items={[
             {
               label: 'Salvar imagem',
-              icon: <IcoDownload />,
+              icon: <IconDownload />,
               onClick: () => window.electronAPI.saveMessageMediaFile({ chatId: selectedChat.id, messageId: imgContextMenu.msg.id }),
             },
             { separator: true },

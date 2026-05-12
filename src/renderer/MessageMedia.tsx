@@ -15,6 +15,14 @@ interface ContextMenuState {
   y: number;
 }
 
+const IconDownload = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+    <polyline points="7 10 12 15 17 10"/>
+    <line x1="12" x2="12" y1="15" y2="3"/>
+  </svg>
+);
+
 export const MessageMedia: React.FC<Props> = ({ chatId, messageId, isVideo, mediaSize }) => {
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [fullMediaSrc, setFullMediaSrc] = useState<string | null>(null);
@@ -162,7 +170,7 @@ export const MessageMedia: React.FC<Props> = ({ chatId, messageId, isVideo, medi
   const contextMenuItems = [
     {
       label: 'Salvar como...',
-      icon: '💾',
+      icon: <IconDownload />,
       onClick: handleSaveMedia,
       disabled: savingMedia,
     },

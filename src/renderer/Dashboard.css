@@ -510,6 +510,67 @@
 }
 .original-msg-divider { height: 1px; background: var(--line-soft); margin: 4px 0; }
 
+/* ── Confirm modal ───────────────────────────────────────────── */
+.confirm-modal-overlay {
+  position: fixed; inset: 0; z-index: 3000;
+  background: oklch(0.08 0.02 250 / 0.75);
+  backdrop-filter: blur(12px);
+  display: flex; align-items: center; justify-content: center; padding: 32px;
+  animation: fade-in 0.15s ease-out;
+}
+.confirm-modal {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  width: 100%; max-width: 380px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  animation: slide-down 0.18s ease-out;
+  overflow: hidden;
+}
+.confirm-modal-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.confirm-modal-header svg { color: var(--text-3); flex-shrink: 0; }
+.confirm-modal-header h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-0); }
+.confirm-modal-body { padding: 16px 20px; }
+.confirm-modal-body p { margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.6; }
+.confirm-modal-footer {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--bg-2);
+}
+.confirm-modal-cancel {
+  padding: 7px 16px;
+  height: auto; width: auto;
+  border-radius: var(--radius);
+  font-size: 13px; font-weight: 500; color: var(--text-2);
+  background: transparent; border: 1px solid var(--line);
+  cursor: pointer; transition: var(--transition-fast);
+  white-space: nowrap; flex-shrink: 0;
+}
+.confirm-modal-cancel:hover { background: var(--bg-hover); color: var(--text-0); }
+.confirm-modal-confirm {
+  padding: 7px 18px; border-radius: var(--radius);
+  font-size: 13px; font-weight: 600;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+  cursor: pointer; transition: var(--transition-fast);
+}
+.confirm-modal-confirm:hover { background: var(--accent); color: var(--accent-text); }
+.confirm-modal-confirm.danger {
+  background: color-mix(in oklch, var(--danger) 14%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in oklch, var(--danger) 30%, transparent);
+}
+.confirm-modal-confirm.danger:hover {
+  background: var(--danger); color: #fff;
+}
+
+
+
 /* ── Settings overlay & panel ───────────────────────────────── */
 .settings-overlay {
   position: fixed; inset: 0; z-index: 1500;

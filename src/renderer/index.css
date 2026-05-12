@@ -674,14 +674,18 @@ input, textarea { font-family: inherit; font-size: inherit; color: inherit; back
   z-index: 50;
 }
 .dropdown-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 13px; color: var(--text-1);
+  padding: 10px 14px;
   cursor: pointer;
-  transition: background .12s, color .12s;
+  font-size: 13px;
+  transition: var(--transition-fast);
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
+.dropdown-item svg { color: var(--text-3); transition: color 0.15s; }
 .dropdown-item:hover { background: var(--bg-hover); color: var(--text-0); }
+.dropdown-item:hover svg { color: var(--text-0); }
 .dropdown-item.danger { color: var(--danger); }
 .dropdown-divider { height: 1px; background: var(--line-soft); margin: 4px 0; }
 

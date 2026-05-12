@@ -46,4 +46,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getOriginalMessage: (data) => ipcRenderer.invoke('cache:get-original-message', data),
   getFullChat: (chatId) => ipcRenderer.invoke('telegram:get-full-chat', chatId),
   getSharedMedia: (data) => ipcRenderer.invoke('telegram:get-shared-media', data),
+  leaveChat: (chatId) => ipcRenderer.invoke('telegram:leave-chat', chatId),
+  muteChat: (data) => ipcRenderer.invoke('telegram:mute-chat', data),
 });

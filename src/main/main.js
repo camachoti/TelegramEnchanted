@@ -1452,3 +1452,53 @@ ipcMain.handle('telegram:get-shared-media', async (event, { chatId, limit = 12 }
   }
 });
 
+ipcMain.handle('telegram:leave-chat', async (event, chatId) => {
+  try {
+    const entity = await client.getEntity(chatId);
+    const inputEntity = await client.getInputEntity(chatId);
+    
+    console.log('Leaving chat:', entity.className, '| ID:', entity.id?.toString());
+
+    if (entity.className === 'Channel') {
+      // Megagrupos e Canais
+      await client.invoke(new Api.channels.LeaveChannel({ channel: inputEntity }));
+    } else if (entity.className === 'Chat') {
+      // Grupos pequenos (legado)
+      const me = await client.getMe();
+      await client.invoke(new Api.messages.DeleteChatUser({
+        chatId: entity.id,
+        userId: await client.getInputEntity(me.id),
+        revokeHistory: false,
+      }));
+    } else {
+      return { success: false, error: 'Não é possível sair de conversas privadas.' };
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Error leaving chat:', error);
+    // Se o erro for que o usuário já não está no grupo, tratamos como sucesso para limpar a UI
+    if (error.message.includes('USER_NOT_PARTICIPANT') || error.message.includes('CHAT_ID_INVALID')) {
+      return { success: true };
+    }
+    return { success: false, error: error.message };
+  }
+});
+
+
+ipcMain.handle('telegram:mute-chat', async (event, { chatId, muteUntil = 2147483647 }) => {
+  try {
+    const peer = await client.getInputEntity(chatId);
+    await client.invoke(new Api.account.UpdateNotifySettings({
+      peer: new Api.InputNotifyPeer({ peer }),
+      settings: new Api.InputPeerNotifySettings({
+        muteUntil: muteUntil
+      })
+    }));
+    return { success: true };
+  } catch (error) {
+    console.error('Error muting chat:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+
