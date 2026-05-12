@@ -1,4 +1,4 @@
-export {};
+export { };
 
 declare global {
   interface Window {
@@ -7,9 +7,10 @@ declare global {
       signIn: (data: { phoneNumber: string; phoneCodeHash: string; phoneCode: string }) => Promise<{ success: boolean; error?: string }>;
       checkAuth: () => Promise<{ isAuthorized: boolean }>;
       getDialogs: () => Promise<{ success: boolean; dialogs?: Array<{ id: string; title: string; isGroup: boolean; isChannel: boolean; hasTopics?: boolean; lastMessageText?: string; lastMessageDate?: number; unreadCount?: number }>; error?: string }>;
+      getChats: (data: { limit?: number; offsetId?: number }) => Promise<{ success: boolean; chats: Array<{ id: string; title: string; isGroup: boolean; isChannel: boolean; isMember?: boolean; hasTopics?: boolean; lastMessageText?: string; lastMessageDate?: number; unreadCount?: number }>; error?: string }>;
       getForumTopics: (chatId: string) => Promise<{ success: boolean; topics?: Array<{ id: number; title: string; topMessageId: number; unreadCount: number; closed: boolean; pinned: boolean }>; error?: string }>;
       getAvatar: (chatId: string) => Promise<{ success: boolean; base64?: string }>;
-      resolveLink: (url: string) => Promise<{ success: boolean; chat?: { id: string; title: string; isGroup: boolean; isChannel: boolean; hasTopics?: boolean }; error?: string }>;
+      resolveLink: (url: string) => Promise<{ success: boolean; chat?: { id: string; title: string; isGroup: boolean; isChannel: boolean; isMember?: boolean; hasTopics?: boolean }; error?: string }>;
       openExternal: (url: string) => Promise<void>;
       onDeepLink: (callback: (url: string) => void) => void;
       getMessages: (data: { chatId: string; limit?: number; offsetId?: number; topicId?: number }) => Promise<{ success: boolean; messages?: Array<{ id: number; text: string; date: number; out: boolean; senderId: string | null; senderName?: string | null; hasMedia: boolean; isPhoto: boolean; isVideo: boolean; reactions?: Array<{ emoji: string; count: number; mine: boolean }>; is_deleted?: boolean; is_edited?: boolean }>; hasMore?: boolean; oldestMessageId?: number | null; error?: string }>;
@@ -34,6 +35,11 @@ declare global {
       getCacheSettings(): Promise<{ success: boolean; maxCacheSize: number; avatarRefreshHours: number }>;
       setCacheSettings(data: { maxCacheSize?: number; avatarRefreshHours?: number }): Promise<{ success: boolean; error?: string }>;
       getOriginalMessage(data: { chatId: string; messageId: number }): Promise<{ success: boolean; message?: { id: number; text: string; date: number; out: boolean; senderId: string | null; senderName?: string | null; hasMedia: boolean; isPhoto: boolean; isVideo: boolean }; error?: string }>;
+      getFullChat: (chatId: string) => Promise<{ success: boolean; fullInfo?: { about: string; participantsCount: number; username: string | null; pinnedMsgId: number | null }; error?: string }>;
+      getSharedMedia: (data: { chatId: string; limit?: number; offsetId?: number }) => Promise<{ success: boolean; media: Array<{ id: number; date: number; hasMedia: boolean; isPhoto: boolean; isVideo: boolean }>; error?: string }>;
+      leaveChat: (chatId: string) => Promise<{ success: boolean; error?: string }>;
+      muteChat: (data: { chatId: string; muteUntil?: number }) => Promise<{ success: boolean; error?: string }>;
+      joinChat: (input: string) => Promise<{ success: boolean; message?: string; error?: string }>;
     };
   }
 }

@@ -659,13 +659,15 @@ ipcMain.handle('telegram:resolve-link', async (event, url) => {
         title: found.title,
         isGroup: found.isGroup,
         isChannel: found.isChannel,
-        hasTopics: Boolean(found.entity?.forum)
+        hasTopics: Boolean(found.entity?.forum),
+        isMember: true
       } : {
         id: entityId,
         title: entity.title || entity.firstName || username,
-        isGroup: !!(entity.megagroup || entity.left || entity.gigagroup || entity.className === 'Channel'),
+        isGroup: !!(entity.megagroup || entity.left || entity.gigagroup || entity.className === 'Channel' || entity.className === 'Chat'),
         isChannel: !!(entity.broadcast),
-        hasTopics: false
+        hasTopics: false,
+        isMember: false
       }
     };
   } catch (error) {
@@ -1195,8 +1197,17 @@ ipcMain.handle('telegram:send-reaction', async (event, { chatId, messageId, reac
 ipcMain.handle('telegram:read-history', async (event, chatId) => {
   try {
     const entity = await client.getEntity(chatId);
-    // client.readHistory(entity) handles both channels and private chats
-    await client.readHistory(entity);
+    if (entity.className === 'Channel') {
+      await client.invoke(new Api.channels.ReadHistory({
+        channel: entity,
+        maxId: 0 // 0 means all messages
+      }));
+    } else {
+      await client.invoke(new Api.messages.ReadHistory({
+        peer: entity,
+        maxId: 0
+      }));
+    }
     return { success: true };
   } catch (error) {
     console.error('Error reading history:', error);
@@ -1502,3 +1513,42 @@ ipcMain.handle('telegram:mute-chat', async (event, { chatId, muteUntil = 2147483
 });
 
 
+ipcMain.handle('telegram:join-chat', async (event, input) => {
+  try {
+    // 1. Try to handle as invite link (+hash or joinchat/hash)
+    const privateHashMatch = input.match(/\/\+([a-zA-Z0-9_-]+)/) || input.match(/\/joinchat\/([a-zA-Z0-9_-]+)/);
+    if (privateHashMatch) {
+      await client.invoke(new Api.messages.ImportChatInvite({ hash: privateHashMatch[1] }));
+      return { success: true };
+    }
+
+    // 2. Try to handle public usernames or IDs
+    let username = input;
+    if (input.includes('t.me/')) {
+      const match = input.match(/t\.me\/([a-zA-Z0-9_]{5,})/);
+      if (match) username = match[1];
+    }
+
+    const entity = await client.getEntity(username);
+    if (entity.className === 'Channel') {
+      await client.invoke(new Api.channels.JoinChannel({ channel: entity }));
+    } else if (entity.className === 'Chat') {
+      await client.invoke(new Api.messages.AddChatUser({
+        chatId: entity.id,
+        userId: await client.getMe(),
+        fwdLimit: 100
+      }));
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Error joining chat:', error);
+    const msg = error.message || '';
+    if (msg.includes('USER_ALREADY_PARTICIPANT') || msg.includes('CHANNELS_ADMIN_PUBLIC_REGEN_FORBIDDEN')) {
+      return { success: true, message: 'Você já faz parte deste grupo/canal.' };
+    }
+    if (msg.includes('INVITE_REQUEST_SENT')) {
+      return { success: true, message: 'Solicitação de entrada enviada! Aguarde a aprovação dos administradores.' };
+    }
+    return { success: false, error: msg };
+  }
+});
