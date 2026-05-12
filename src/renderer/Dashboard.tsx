@@ -37,6 +37,10 @@ interface Chat {
   isGroup: boolean;
   isChannel: boolean;
   isMember?: boolean;
+  isInvite?: boolean;
+  inviteHash?: string;
+  about?: string;
+  participantsCount?: number;
   hasTopics?: boolean;
   lastMessageText?: string;
   lastMessageDate?: number;
@@ -240,6 +244,8 @@ export const Dashboard: React.FC = () => {
     title: string;
     body: string;
     danger?: boolean;
+    hideCancel?: boolean;
+    confirmText?: string;
     onConfirm: () => void;
   } | null>(null);
 
@@ -294,11 +300,13 @@ export const Dashboard: React.FC = () => {
   const isTelegramLink = (url: string) => {
     if (url.startsWith('tg://')) return true;
     try {
-      const parsed = new URL(url);
+      const lower = url.toLowerCase();
+      if (lower.startsWith('tg:')) return true;
+      const parsed = new URL(url.startsWith('http') ? url : `https://${url}`);
       const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
       return host === 't.me' || host === 'telegram.me' || host === 'telegram.dog' || parsed.protocol === 'tg:';
     } catch {
-      return url.includes('t.me/') || url.includes('telegram.me/');
+      return url.toLowerCase().includes('t.me/') || url.toLowerCase().includes('telegram.me/');
     }
   };
 
@@ -307,27 +315,27 @@ export const Dashboard: React.FC = () => {
   const handleTelegramLink = async (url: string) => {
     try {
       const lowerUrl = url.toLowerCase();
-      const isInvite = lowerUrl.includes('t.me/+') || lowerUrl.includes('/joinchat/') || lowerUrl.includes('invite=');
+      const isInvite = lowerUrl.includes('t.me/+') || lowerUrl.includes('/joinchat/') || lowerUrl.includes('/invite/') || lowerUrl.includes('invite=');
 
       if (isInvite) {
-        setConfirmModal({
-          title: 'Entrar no grupo',
-          body: `Você deseja entrar neste grupo através do link de convite?\n\n${url}`,
-          onConfirm: async () => {
-            const res = await window.electronAPI.joinChat(url);
-            if (res.success) {
-              const chatsRes = await window.electronAPI.getChats({ limit: 50 });
-              if (chatsRes.success) setChats(chatsRes.chats);
-              setConfirmModal({
-                title: 'Sucesso',
-                body: res.message || 'Você entrou no grupo com sucesso!',
-                onConfirm: () => setConfirmModal(null)
-              });
-            } else {
-              setConfirmModal(prev => prev ? { ...prev, body: `Erro ao entrar: ${res.error}` } : null);
-            }
+        const inviteRes = await window.electronAPI.checkInvite(url);
+        if (inviteRes.success && inviteRes.chat) {
+          if (inviteRes.alreadyMember) {
+            const existing = chats.find(c => c.id === inviteRes.chat!.id);
+            if (!existing) setChats(prev => [inviteRes.chat!, ...prev]);
+            setSelectedChat(inviteRes.chat!);
+          } else {
+            setSelectedChat(inviteRes.chat!);
           }
-        });
+        } else {
+          setConfirmModal({
+            title: 'Erro',
+            body: inviteRes.error || 'Não foi possível obter informações do convite.',
+            hideCancel: true,
+            confirmText: 'Fechar',
+            onConfirm: () => setConfirmModal(null)
+          });
+        }
         return;
       }
 
@@ -337,21 +345,17 @@ export const Dashboard: React.FC = () => {
         if (!existing) setChats(prev => [res.chat!, ...prev]);
         setSelectedChat(res.chat!);
       } else {
-        setConfirmModal({
-          title: 'Acessar Link',
-          body: `Deseja tentar abrir ou entrar neste canal/grupo?\n\n${url}`,
-          onConfirm: async () => {
-            const joinRes = await window.electronAPI.joinChat(url);
-            if (joinRes.success) {
-              const chatsRes = await window.electronAPI.getChats({ limit: 50 });
-              if (chatsRes.success) setChats(chatsRes.chats);
-              setConfirmModal(null);
-            } else {
-              window.electronAPI.openExternal(url);
-              setConfirmModal(null);
-            }
-          }
-        });
+        if (isTelegramLink(url)) {
+          setConfirmModal({
+            title: 'Não encontrado',
+            body: `Não conseguimos encontrar este chat no Telegram: ${res.error || 'Erro desconhecido'}`,
+            hideCancel: true,
+            confirmText: 'Fechar',
+            onConfirm: () => setConfirmModal(null)
+          });
+        } else {
+          window.electronAPI.openExternal(url);
+        }
       }
     } catch (err) {
       console.error('Handle link error:', err);
@@ -413,11 +417,20 @@ export const Dashboard: React.FC = () => {
       setIsMenuOpen(false);
       setFullChatInfo(null);
       setSharedMedia([]);
-      fetchForumTopics(selectedChat);
-      fetchFullChat(selectedChat.id);
-      fetchSharedMedia(selectedChat.id);
-      if (!selectedChat.hasTopics) loadMessages(selectedChat.id);
-      else topicListScrollRef.current = 0;
+      if (selectedChat.isInvite) {
+        setFullChatInfo({
+          about: selectedChat.about,
+          participantsCount: selectedChat.participantsCount
+        });
+        setMessages([]);
+        setHasMoreMessages(false);
+      } else {
+        fetchForumTopics(selectedChat);
+        fetchFullChat(selectedChat.id);
+        fetchSharedMedia(selectedChat.id);
+        if (!selectedChat.hasTopics) loadMessages(selectedChat.id);
+        else topicListScrollRef.current = 0;
+      }
     } else {
       setMessages([]);
       setHasMoreMessages(false);
@@ -1205,66 +1218,101 @@ export const Dashboard: React.FC = () => {
                 </div>
               )}
 
-              {/* Composer */}
+              {/* Composer or Join Bar */}
               {showComposer && (
-                <div className="composer-wrap">
-                  <div className="composer">
-                    {replyTo && (
-                      <div className="reply-strip">
-                        <div className="reply-bar" />
-                        <span className="reply-from">Respondendo</span>
-                        <span className="reply-text">{replyTo.text ? replyTo.text.slice(0, 80) : 'Mídia'}</span>
-                        <button type="button" className="close icon-btn" onClick={() => setReplyTo(null)}>✕</button>
-                      </div>
-                    )}
-                    {selectedFile && (
-                      <div className="composer-file-chip">
-                        <span className="chip">
-                          <IconAttach /> {selectedFile.fileName}
-                          <button type="button" className="icon-btn" style={{ width: 18, height: 18 }} onClick={() => setSelectedFile(null)}>✕</button>
-                        </span>
-                      </div>
-                    )}
-                    {sendProgress !== null && (
-                      <div className="composer-progress">
-                        <div className="composer-progress-fill animated-stripes" style={{ width: `${sendProgress}%` }} />
-                      </div>
-                    )}
-                    <div className="composer-main">
-                      <div className="composer-tools">
-                        <button type="button" className="icon-btn" onClick={handleSelectFile} disabled={isSending} title="Anexar arquivo">
-                          <IconAttach />
+                selectedChat.isMember !== false ? (
+                  <div className="composer-wrap">
+                    <div className="composer">
+                      {replyTo && (
+                        <div className="reply-strip">
+                          <div className="reply-bar" />
+                          <span className="reply-from">Respondendo</span>
+                          <span className="reply-text">{replyTo.text ? replyTo.text.slice(0, 80) : 'Mídia'}</span>
+                          <button type="button" className="close icon-btn" onClick={() => setReplyTo(null)}>✕</button>
+                        </div>
+                      )}
+                      {selectedFile && (
+                        <div className="composer-file-chip">
+                          <span className="chip">
+                            <IconAttach /> {selectedFile.fileName}
+                            <button type="button" className="icon-btn" style={{ width: 18, height: 18 }} onClick={() => setSelectedFile(null)}>✕</button>
+                          </span>
+                        </div>
+                      )}
+                      {sendProgress !== null && (
+                        <div className="composer-progress">
+                          <div className="composer-progress-fill animated-stripes" style={{ width: `${sendProgress}%` }} />
+                        </div>
+                      )}
+                      <div className="composer-main">
+                        <div className="composer-tools">
+                          <button type="button" className="icon-btn" onClick={handleSelectFile} disabled={isSending} title="Anexar arquivo">
+                            <IconAttach />
+                          </button>
+                          <button type="button" className="icon-btn" title="Emoji">
+                            <IconEmoji />
+                          </button>
+                        </div>
+                        <textarea
+                          value={inputText}
+                          onChange={e => setInputText(e.target.value)}
+                          onInput={e => {
+                            const ta = e.currentTarget;
+                            ta.style.height = 'auto';
+                            ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+                          }}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                          }}
+                          placeholder="Escreva uma mensagem..."
+                          rows={1}
+                          disabled={isSending}
+                        />
+                        <button
+                          type="button"
+                          className="composer-send"
+                          onClick={handleSend}
+                          disabled={(!inputText.trim() && !selectedFile) || isSending}
+                        >
+                          {isSending ? <span className="spinner small-spinner" /> : <IconSend />}
                         </button>
-                        <button type="button" className="icon-btn" title="Emoji">
-                          <IconEmoji />
-                        </button>
                       </div>
-                      <textarea
-                        value={inputText}
-                        onChange={e => setInputText(e.target.value)}
-                        onInput={e => {
-                          const ta = e.currentTarget;
-                          ta.style.height = 'auto';
-                          ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
-                        }}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-                        }}
-                        placeholder="Escreva uma mensagem..."
-                        rows={1}
-                        disabled={isSending}
-                      />
-                      <button
-                        type="button"
-                        className="composer-send"
-                        onClick={handleSend}
-                        disabled={(!inputText.trim() && !selectedFile) || isSending}
-                      >
-                        {isSending ? <span className="spinner small-spinner" /> : <IconSend />}
-                      </button>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="join-channel-bar">
+                    <div className="join-channel-info">
+                      <h3>{selectedChat.title}</h3>
+                      {fullChatInfo?.participantsCount !== undefined && (
+                        <span>{fullChatInfo.participantsCount.toLocaleString()} participantes</span>
+                      )}
+                    </div>
+                    <button
+                      className="join-channel-btn"
+                      onClick={async () => {
+                        const res = await window.electronAPI.joinChat(selectedChat.isInvite ? `https://t.me/+${selectedChat.inviteHash}` : selectedChat.id);
+                        if (res.success) {
+                          setSelectedChat(prev => prev ? { ...prev, isMember: true, isInvite: false } : null);
+                          const chatsRes = await window.electronAPI.getChats({ limit: 50 });
+                          if (chatsRes.success) setChats(chatsRes.chats);
+                          setConfirmModal({
+                            title: 'Sucesso',
+                            body: res.message || 'Você entrou no grupo com sucesso!',
+                            onConfirm: () => setConfirmModal(null)
+                          });
+                        } else {
+                          setConfirmModal({
+                            title: 'Erro',
+                            body: `Erro ao entrar: ${res.error}`,
+                            onConfirm: () => setConfirmModal(null)
+                          });
+                        }
+                      }}
+                    >
+                      ENTRAR NO {selectedChat.isChannel ? 'CANAL' : 'GRUPO'}
+                    </button>
+                  </div>
+                )
               )}
             </>
           ) : (
@@ -1499,14 +1547,16 @@ export const Dashboard: React.FC = () => {
               <p>{confirmModal.body}</p>
             </div>
             <div className="confirm-modal-footer">
-              <button className="confirm-modal-cancel" onClick={() => setConfirmModal(null)}>
-                Cancelar
-              </button>
+              {!confirmModal.hideCancel && (
+                <button className="confirm-modal-cancel" onClick={() => setConfirmModal(null)}>
+                  Cancelar
+                </button>
+              )}
               <button
                 className={`confirm-modal-confirm ${confirmModal.danger ? 'danger' : ''}`}
                 onClick={confirmModal.onConfirm}
               >
-                {confirmModal.danger ? 'Sair' : 'Confirmar'}
+                {confirmModal.confirmText || (confirmModal.danger ? 'Sair' : 'Confirmar')}
               </button>
             </div>
           </div>

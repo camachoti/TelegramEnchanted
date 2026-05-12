@@ -48,5 +48,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSharedMedia: (data) => ipcRenderer.invoke('telegram:get-shared-media', data),
   leaveChat: (chatId) => ipcRenderer.invoke('telegram:leave-chat', chatId),
   muteChat: (data) => ipcRenderer.invoke('telegram:mute-chat', data),
-  joinChat: (inviteLink) => ipcRenderer.invoke('telegram:join-chat', inviteLink),
+  joinChat: (input) => ipcRenderer.invoke('telegram:join-chat', input),
+  getChats: (data) => ipcRenderer.invoke('telegram:get-dialogs', data),
+  checkInvite: (url) => ipcRenderer.invoke('telegram:check-invite', url),
 });

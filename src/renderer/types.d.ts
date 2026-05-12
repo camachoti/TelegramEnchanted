@@ -40,6 +40,7 @@ declare global {
       leaveChat: (chatId: string) => Promise<{ success: boolean; error?: string }>;
       muteChat: (data: { chatId: string; muteUntil?: number }) => Promise<{ success: boolean; error?: string }>;
       joinChat: (input: string) => Promise<{ success: boolean; message?: string; error?: string }>;
+      checkInvite: (url: string) => Promise<{ success: boolean; alreadyMember?: boolean; chat?: { id: string; title: string; about?: string; participantsCount?: number; isGroup: boolean; isChannel: boolean; isMember: boolean; isInvite?: boolean; inviteHash?: string }; error?: string }>;
     };
   }
 }

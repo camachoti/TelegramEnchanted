@@ -1549,6 +1549,55 @@ ipcMain.handle('telegram:join-chat', async (event, input) => {
     if (msg.includes('INVITE_REQUEST_SENT')) {
       return { success: true, message: 'Solicitação de entrada enviada! Aguarde a aprovação dos administradores.' };
     }
+    if (msg.includes('INVITE_HASH_EXPIRED')) {
+      return { success: false, error: 'Este link de convite expirou ou é inválido.' };
+    }
     return { success: false, error: msg };
+  }
+});
+
+ipcMain.handle('telegram:check-invite', async (event, url) => {
+  try {
+    const hashMatch = url.match(/\/\+([a-zA-Z0-9_-]+)/) || url.match(/\/joinchat\/([a-zA-Z0-9_-]+)/) || url.match(/\/invite\/([a-zA-Z0-9_-]+)/);
+    if (!hashMatch) return { success: false, error: 'Link de convite inválido.' };
+    
+    const invite = await client.invoke(new Api.messages.CheckChatInvite({ hash: hashMatch[1] }));
+    
+    if (invite.className === 'ChatInviteAlready') {
+      const chat = invite.chat;
+      return {
+        success: true,
+        alreadyMember: true,
+        chat: {
+          id: chat.id.toString(),
+          title: chat.title,
+          isGroup: true,
+          isChannel: !!chat.broadcast,
+          isMember: true
+        }
+      };
+    }
+
+    return {
+      success: true,
+      alreadyMember: false,
+      chat: {
+        id: 'invite_' + hashMatch[1],
+        title: invite.title,
+        about: invite.about,
+        participantsCount: invite.participantsCount,
+        isGroup: true,
+        isChannel: !!invite.broadcast,
+        isMember: false,
+        isInvite: true,
+        inviteHash: hashMatch[1]
+      }
+    };
+  } catch (error) {
+    let errorMessage = error.message;
+    if (errorMessage.includes('INVITE_HASH_EXPIRED')) {
+      errorMessage = 'Este link de convite expirou ou é inválido.';
+    }
+    return { success: false, error: errorMessage };
   }
 });
