@@ -20,9 +20,11 @@ interface ContextMenuProps {
   y: number;
   items: ContextMenuItem[];
   onClose: () => void;
+  palette?: string;
+  density?: string;
 }
 
-export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }) => {
+export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose, palette, density }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -53,6 +55,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }
     <div
       ref={menuRef}
       className="context-menu"
+      data-palette={palette}
+      data-density={density}
       style={{ position: 'fixed', left: x, top: y, zIndex: 99999 }}
       onContextMenu={(e) => e.preventDefault()}
     >

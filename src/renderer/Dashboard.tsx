@@ -25,7 +25,7 @@ const hashColor = (str: string): PlasmaColor => {
   return PLASMA_COLORS[Math.abs(h) % PLASMA_COLORS.length];
 };
 
-const PALETTES = ['ion', 'ember', 'bloom', 'forest'] as const;
+const PALETTES = ['ion', 'ember', 'bloom', 'forest', 'light'] as const;
 type Palette = typeof PALETTES[number];
 
 const DENSITIES = ['compact', 'cozy', 'roomy'] as const;
@@ -156,9 +156,9 @@ const IconTrash = () => (
 );
 const IconMagic = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="m12 3 1.912 4.913L19 9l-5.088 1.087L12 15l-1.912-4.913L5 9l5.088-1.087L12 3Z" />
-    <path d="m5 3 1 2.5L8.5 4l-1.5 1 1 2.5L5.5 6 4 8.5 5 6 2.5 5 5 4 4 1.5 5 3Z" />
-    <path d="m19 15.5 1 2.5 2.5-1.5-1.5 1 1 2.5-2.5-1.5-1.5 2.5 1-2.5-2.5-1.5 2.5-1-1-2.5 1 2.5Z" />
+    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    <polyline points="12 11 12 19 9 16" />
+    <line x1="15" x2="12" y1="16" y2="19" />
   </svg>
 );
 const IconDownload = () => (
@@ -494,12 +494,31 @@ export const Dashboard: React.FC = () => {
   const fetchDialogs = async () => {
     try {
       const res = await window.electronAPI.getDialogs();
-      if (res.success && res.dialogs) setChats(res.dialogs);
+      if (res.success && res.dialogs) {
+        setChats(res.dialogs);
+        // Preload avatars in background so the list feels instant
+        preloadAvatars(res.dialogs);
+      }
       else setError(res.error || 'Failed to fetch chats');
     } catch (e: any) {
       setError(e.message || 'Unknown error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const preloadAvatars = async (dialogs: Chat[]) => {
+    const BATCH_SIZE = 8;
+    const MAX_PRELOAD = 60;
+    const targets = dialogs.slice(0, MAX_PRELOAD).filter(d => !d.id.startsWith('invite_'));
+    for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+      const batch = targets.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(d => window.electronAPI.getAvatar(d.id).catch(() => null))
+      );
+      if (i + BATCH_SIZE < targets.length) {
+        await new Promise(r => setTimeout(r, 80));
+      }
     }
   };
 
@@ -846,7 +865,7 @@ export const Dashboard: React.FC = () => {
               {isSettingsMenuOpen && (
                 <div className="dropdown-menu" style={{ bottom: 'calc(100% + 8px)', top: 'auto', right: 0 }} onClick={e => e.stopPropagation()}>
                   <div className="dropdown-item" onClick={() => { setIsSettingsOpen(true); setIsSettingsMenuOpen(false); }}>
-                    ⚙️ Configurações de Cache
+                    <IconSettings /> Configurações de Cache
                   </div>
                   <div className="dropdown-divider" />
                   <div style={{ padding: '6px 12px 4px', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Paleta</div>
@@ -974,7 +993,7 @@ export const Dashboard: React.FC = () => {
                   <div className="inline-download-panel">
                     <div className="inline-panel-header">
                       <div className="inline-panel-title">
-                        <span>🪄</span>
+                        <IconMagic />
                         <h3>Mass Download</h3>
                       </div>
                       <button className="icon-btn" onClick={() => setIsDownloadModalOpen(false)}>✕</button>
@@ -1196,7 +1215,7 @@ export const Dashboard: React.FC = () => {
                                       setImgContextMenu({ x: e.clientX, y: e.clientY, msg });
                                     }}
                                   >
-                                    <MessageMedia chatId={selectedChat.id} messageId={msg.id} isVideo={msg.isVideo} mediaSize={msg.mediaSize} />
+                                    <MessageMedia chatId={selectedChat.id} messageId={msg.id} isVideo={msg.isVideo} mediaSize={msg.mediaSize} palette={palette} density={density} />
                                   </div>
                                 )}
                                 {msg.text && <div className="msg-text">{linkifyText(msg.text)}</div>}
@@ -1449,6 +1468,8 @@ export const Dashboard: React.FC = () => {
                           chatId={selectedChat.id}
                           messageId={m.id}
                           isVideo={m.isVideo}
+                          palette={palette}
+                          density={density}
                         />
                       </div>
                     ))}
@@ -1471,6 +1492,8 @@ export const Dashboard: React.FC = () => {
         <ContextMenu
           x={chatContextMenu.x}
           y={chatContextMenu.y}
+          palette={palette}
+          density={density}
           items={[
             {
               label: 'Ver informações',
@@ -1550,6 +1573,8 @@ export const Dashboard: React.FC = () => {
         <ContextMenu
           x={msgContextMenu.x}
           y={msgContextMenu.y}
+          palette={palette}
+          density={density}
           items={[
             {
               label: 'Responder',
@@ -1637,6 +1662,8 @@ export const Dashboard: React.FC = () => {
         <ContextMenu
           x={imgContextMenu.x}
           y={imgContextMenu.y}
+          palette={palette}
+          density={density}
           items={[
             {
               label: 'Salvar imagem',

@@ -8,7 +8,7 @@
   "scripts": {
     "start": "vite",
     "build": "vite build && electron-builder",
-    "electron": "cross-env NODE_ENV=development electron .",
+    "electron": "cross-env NODE_ENV=development ELECTRON_RUN_AS_NODE= electron .",
     "dev": "node scripts/dev.mjs"
   },
   "build": {
@@ -63,7 +63,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
     "cross-env": "^7.0.3",
-    "electron": "^32.0.0",
+    "electron": "^39.8.10",
     "electron-builder": "^26.8.1",
     "typescript": "^5.9.3",
     "vite": "^8.0.3",

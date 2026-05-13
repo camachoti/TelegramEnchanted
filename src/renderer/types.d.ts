@@ -31,7 +31,7 @@ declare global {
       sendReaction(data: { chatId: string; messageId: number; reaction: string }): Promise<{ success: boolean; error?: string }>;
       onSendProgress(callback: (data: { progress: number }) => void): () => void;
       readHistory(chatId: string): Promise<{ success: boolean; error?: string }>;
-      getCacheStats(): Promise<{ success: boolean; totalSize: number; messageCount: number; mediaCount: number; avatarCount: number }>;
+      getCacheStats(): Promise<{ success: boolean; totalSize: number; messageCount: number; mediaCount: number; avatarCount: number; topicCount: number }>;
       clearCache(): Promise<{ success: boolean; error?: string }>;
       getCacheSettings(): Promise<{ success: boolean; maxCacheSize: number; avatarRefreshHours: number }>;
       setCacheSettings(data: { maxCacheSize?: number; avatarRefreshHours?: number }): Promise<{ success: boolean; error?: string }>;

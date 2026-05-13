@@ -7,6 +7,8 @@ interface Props {
   messageId: number;
   isVideo: boolean;
   mediaSize?: number | null;
+  palette?: string;
+  density?: string;
 }
 
 interface ContextMenuState {
@@ -23,7 +25,7 @@ const IconDownload = () => (
   </svg>
 );
 
-export const MessageMedia: React.FC<Props> = ({ chatId, messageId, isVideo, mediaSize }) => {
+export const MessageMedia: React.FC<Props> = ({ chatId, messageId, isVideo, mediaSize, palette, density }) => {
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [fullMediaSrc, setFullMediaSrc] = useState<string | null>(null);
   const [videoStreamUrl, setVideoStreamUrl] = useState<string | null>(null);
@@ -233,6 +235,8 @@ export const MessageMedia: React.FC<Props> = ({ chatId, messageId, isVideo, medi
             y={contextMenu.y}
             items={contextMenuItems}
             onClose={closeContextMenu}
+            palette={palette}
+            density={density}
           />
         )}
 
@@ -299,12 +303,14 @@ export const MessageMedia: React.FC<Props> = ({ chatId, messageId, isVideo, medi
             </div>
 
             {contextMenu.visible && (
-              <ContextMenu
-                x={contextMenu.x}
-                y={contextMenu.y}
-                items={contextMenuItems}
-                onClose={closeContextMenu}
-              />
+            <ContextMenu
+              x={contextMenu.x}
+              y={contextMenu.y}
+              items={contextMenuItems}
+              onClose={closeContextMenu}
+              palette={palette}
+              density={density}
+            />
             )}
           </div>,
           document.querySelector('.dashboard-container') || document.body

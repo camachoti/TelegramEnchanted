@@ -446,6 +446,7 @@
 .palette-dot.ember { background: oklch(0.78 0.17 55); }
 .palette-dot.bloom { background: oklch(0.74 0.20 330); }
 .palette-dot.forest { background: oklch(0.78 0.14 155); }
+.palette-dot.light { background: oklch(0.92 0.02 250); border: 1px solid oklch(0.75 0.02 250); }
 
 /* ── Density picker (in dropdown) ───────────────────────────── */
 .density-row { display: flex; gap: 4px; padding: 4px 12px 8px; }
@@ -623,7 +624,7 @@
   margin: 0 0 12px; font-size: 11px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-3);
 }
-.settings-stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.settings-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .settings-stat {
   background: var(--bg-2); border: 1px solid var(--line-soft);
   border-radius: var(--radius); padding: 12px;

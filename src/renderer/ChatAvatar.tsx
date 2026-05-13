@@ -9,10 +9,9 @@ export const ChatAvatar: React.FC<Props> = ({ chatId, title }) => {
   const [imgData, setImgData] = useState<string | null>(null);
   
   useEffect(() => {
-    // Only fetch once
+    setImgData(null);
     const fetchAvatar = async () => {
       if (chatId.startsWith('invite_')) return;
-      
       const res = await window.electronAPI.getAvatar(chatId);
       if (res.success && res.base64) {
         setImgData(`data:image/jpeg;base64,${res.base64}`);
