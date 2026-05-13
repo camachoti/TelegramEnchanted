@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   sendCode: (phoneNumber) => ipcRenderer.invoke('telegram:send-code', phoneNumber),
@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('media:progress', listener);
   },
   selectFile: () => ipcRenderer.invoke('dialog:select-file'),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   sendMessage: (data) => ipcRenderer.invoke('telegram:send-message', data),
   sendMedia: (data) => ipcRenderer.invoke('telegram:send-media', data),
   createTopic: (data) => ipcRenderer.invoke('telegram:create-topic', data),

@@ -5,7 +5,7 @@ import { MessageMedia } from './MessageMedia';
 import { ContextMenu, IcoDownload, IcoCopy, IcoForward, IcoReply } from './ContextMenu';
 import { Settings } from './Settings';
 
-const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '😱', '😢', '🎉', '🙏', '👌', '💯', '🤣', '🤩', '🤮', '💩', '🖕', '😈'];
 
 const TOPIC_ICON_COLORS = [
   { label: 'Vermelho', value: 16711680, css: '#ff4444' },
@@ -235,6 +235,7 @@ export const Dashboard: React.FC = () => {
   const [originalMsgModal, setOriginalMsgModal] = useState<{ msg: Message; original: { id: number; text: string; date: number } } | null>(null);
   const [activeFolder, setActiveFolder] = useState<'all' | 'unread'>('all');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
   const [fullChatInfo, setFullChatInfo] = useState<ChatFullInfo | null>(null);
   const [loadingFullInfo, setLoadingFullInfo] = useState(false);
@@ -669,9 +670,38 @@ export const Dashboard: React.FC = () => {
   const handleReact = useCallback(async (msg: Message, emoji: string) => {
     setEmojiPickerMsgId(null);
     if (!selectedChat) return;
+
+    // Optimistic UI Update
+    setMessages(prev => prev.map(m => {
+      if (m.id !== msg.id) return m;
+      
+      const reactions = [...(m.reactions || [])];
+      const existingIdx = reactions.findIndex(r => r.emoji === emoji);
+      
+      if (existingIdx > -1) {
+        const r = reactions[existingIdx];
+        if (r.mine) {
+          // Remove my reaction
+          if (r.count <= 1) reactions.splice(existingIdx, 1);
+          else reactions[existingIdx] = { ...r, count: r.count - 1, mine: false };
+        } else {
+          // Toggle to mine
+          reactions[existingIdx] = { ...r, count: r.count + 1, mine: true };
+        }
+      } else {
+        // Add new reaction
+        reactions.push({ emoji, count: 1, mine: true });
+      }
+      
+      return { ...m, reactions };
+    }));
+
     try {
       await window.electronAPI.sendReaction({ chatId: selectedChat.id, messageId: msg.id, reaction: emoji });
-    } catch { }
+    } catch (err) {
+      console.error('Failed to send reaction:', err);
+      // Revert or fetch messages again if needed
+    }
   }, [selectedChat]);
 
   useEffect(() => {
@@ -838,7 +868,24 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* ── Convo ────────────────────────────────────────────────── */}
-        <div className="convo">
+        <div 
+          className={`convo ${isDraggingOver ? 'dragging-over' : ''}`}
+          onDragOver={(e) => { e.preventDefault(); setIsDraggingOver(true); }}
+          onDragLeave={(e) => { e.preventDefault(); setIsDraggingOver(false); }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDraggingOver(false);
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+              const file = e.dataTransfer.files[0] as File & { path?: string };
+              const realPath = window.electronAPI.getPathForFile ? window.electronAPI.getPathForFile(file) : file.path;
+              if (realPath) {
+                setSelectedFile({ filePath: realPath, fileName: file.name });
+              } else {
+                setError('O arquivo precisa ser arrastado de uma pasta do seu computador.');
+              }
+            }
+          }}
+        >
           {selectedChat ? (
             <>
               {/* Header */}
@@ -871,8 +918,7 @@ export const Dashboard: React.FC = () => {
                         const res = await window.electronAPI.joinChat(selectedChat.id);
                         if (res.success) {
                           setSelectedChat(prev => prev ? { ...prev, isMember: true } : null);
-                          const chatsRes = await window.electronAPI.getChats({ limit: 50 });
-                          if (chatsRes.success) setChats(chatsRes.chats);
+                          fetchDialogs();
                           setConfirmModal({
                             title: 'Sucesso',
                             body: res.message || 'Você entrou no grupo com sucesso!',
@@ -1171,7 +1217,11 @@ export const Dashboard: React.FC = () => {
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                                        setEmojiPickerPos({ x: rect.left, y: rect.top - 56 });
+                                        const pickerHeight = 300;
+                                        const y = (rect.bottom + pickerHeight > window.innerHeight) 
+                                          ? rect.top - pickerHeight - 8 
+                                          : rect.bottom + 8;
+                                        setEmojiPickerPos({ x: rect.left, y });
                                         setEmojiPickerMsgId(prev => prev === msg.id ? null : msg.id);
                                       }}
                                     >+</button>
@@ -1184,7 +1234,11 @@ export const Dashboard: React.FC = () => {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                                    setEmojiPickerPos({ x: rect.left, y: rect.top - 56 });
+                                    const pickerHeight = 300; // Approximate height of 21 emojis in 3 cols
+                                    const y = (rect.bottom + pickerHeight > window.innerHeight) 
+                                      ? rect.top - pickerHeight - 8 
+                                      : rect.bottom + 8;
+                                    setEmojiPickerPos({ x: rect.left, y });
                                     setEmojiPickerMsgId(prev => prev === msg.id ? null : msg.id);
                                   }}
                                 >😊</button>
@@ -1293,8 +1347,7 @@ export const Dashboard: React.FC = () => {
                         const res = await window.electronAPI.joinChat(selectedChat.isInvite ? `https://t.me/+${selectedChat.inviteHash}` : selectedChat.id);
                         if (res.success) {
                           setSelectedChat(prev => prev ? { ...prev, isMember: true, isInvite: false } : null);
-                          const chatsRes = await window.electronAPI.getChats({ limit: 50 });
-                          if (chatsRes.success) setChats(chatsRes.chats);
+                          fetchDialogs();
                           setConfirmModal({
                             title: 'Sucesso',
                             body: res.message || 'Você entrou no grupo com sucesso!',

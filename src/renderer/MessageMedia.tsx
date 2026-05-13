@@ -178,7 +178,12 @@ export const MessageMedia: React.FC<Props> = ({ chatId, messageId, isVideo, medi
 
   const canOpenViewer = Boolean(previewSrc || fullMediaSrc || isVideo);
   const shouldShowProgress = loadingFullMedia || savingMedia || (mediaProgress > 0 && mediaProgress < 100);
-  const progressLabel = mediaStage === 'streaming' ? 'Streaming' : 'Carregando';
+  let progressLabel = 'Carregando';
+  if (savingMedia || mediaStage === 'downloading') {
+    progressLabel = 'Baixando';
+  } else if (mediaStage === 'streaming') {
+    progressLabel = 'Streaming';
+  }
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 B';

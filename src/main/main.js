@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { TelegramClient, Api, utils } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
+import { CustomFile } from 'telegram/client/uploads.js';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
 import fs from 'fs';
@@ -1146,8 +1147,9 @@ ipcMain.handle('telegram:send-message', async (event, { chatId, text, replyToId,
 ipcMain.handle('telegram:send-media', async (event, { chatId, filePath, caption, replyToId, topicId }) => {
   try {
     const entity = await client.getEntity(chatId);
+    const customFile = new CustomFile(path.basename(filePath), fs.statSync(filePath).size, filePath);
     const msg = await client.sendFile(entity, {
-      file: filePath,
+      file: customFile,
       caption: caption || '',
       replyTo: replyToId || undefined,
       topMsgId: topicId || undefined,

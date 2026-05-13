@@ -77,6 +77,30 @@
 .messages-load-more button:disabled { opacity: 0.5; pointer-events: none; }
 
 /* ── Empty convo state ─────────────────────────────────────── */
+.convo {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column;
+  background: var(--bg-1);
+  position: relative;
+  transition: background 0.2s ease;
+}
+
+.convo.dragging-over::after {
+  content: 'Solte para enviar o arquivo';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 24px;
+  font-weight: 600;
+  z-index: 1000;
+  border: 4px dashed var(--accent);
+  pointer-events: none;
+}
 .convo-empty {
   flex: 1;
   display: flex; flex-direction: column;
@@ -441,11 +465,13 @@
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  padding: 6px;
-  display: flex;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 4px;
-  box-shadow: 0 8px 24px -8px rgba(0,0,0,0.5);
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.6);
   animation: contextMenuFade 0.12s ease-out;
+  backdrop-filter: blur(12px);
 }
 .emoji-react-btn {
   width: 36px; height: 36px;

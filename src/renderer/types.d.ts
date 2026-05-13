@@ -24,6 +24,7 @@ declare global {
       onMediaProgress: (callback: (data: { chatId: string; messageId: number; downloaded: number; total: number; progress: number; stage: string }) => void) => (() => void);
       stopDownload(): Promise<{ success: boolean }>;
       selectFile(): Promise<{ success: boolean; filePath?: string; fileName?: string }>;
+      getPathForFile(file: File): string;
       sendMessage(data: { chatId: string; text: string; replyToId?: number; topicId?: number }): Promise<{ success: boolean; messageId?: number; error?: string }>;
       sendMedia(data: { chatId: string; filePath: string; caption?: string; replyToId?: number; topicId?: number }): Promise<{ success: boolean; messageId?: number; error?: string }>;
       createTopic(data: { chatId: string; title: string; iconColor?: number }): Promise<{ success: boolean; error?: string }>;
