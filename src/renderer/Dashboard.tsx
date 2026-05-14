@@ -585,8 +585,8 @@ export const Dashboard: React.FC = () => {
     loadMessages(selectedChat!.id);
   };
 
-  const loadMessages = async (chatId: string, offsetId = 0, topicId?: number) => {
-    setLoadingMessages(true);
+  const loadMessages = async (chatId: string, offsetId = 0, topicId?: number, options: { silent?: boolean } = {}) => {
+    if (!options.silent) setLoadingMessages(true);
     try {
       const res = await window.electronAPI.getMessages({ chatId, limit: PAGE_SIZE, offsetId, topicId });
       if (res.success && res.messages) {
@@ -645,25 +645,56 @@ export const Dashboard: React.FC = () => {
     if (!selectedChat || (!inputText.trim() && !selectedFile) || isSending) return;
     const topicId = viewingTopic && viewingTopic.id !== 0 ? viewingTopic.id : undefined;
     const replyToId = replyTo?.id;
+    const textToSend = inputText.trim();
+    const fileToSend = selectedFile;
+
+    // Clear input immediately for better UX
+    setInputText('');
+    setReplyTo(null);
+    setSelectedFile(null);
     setIsSending(true);
-    if (selectedFile) setSendProgress(0);
+
+    if (fileToSend) setSendProgress(0);
     try {
       let res;
-      if (selectedFile) {
+      if (fileToSend) {
         const unsub = window.electronAPI.onSendProgress((data) => setSendProgress(data.progress));
         try {
-          res = await window.electronAPI.sendMedia({ chatId: selectedChat.id, filePath: selectedFile.filePath, caption: inputText.trim() || undefined, replyToId, topicId });
+          res = await window.electronAPI.sendMedia({
+            chatId: selectedChat.id,
+            filePath: fileToSend.filePath,
+            caption: textToSend || undefined,
+            replyToId,
+            topicId
+          });
         } finally { unsub(); }
       } else {
-        res = await window.electronAPI.sendMessage({ chatId: selectedChat.id, text: inputText.trim(), replyToId, topicId });
+        res = await window.electronAPI.sendMessage({
+          chatId: selectedChat.id,
+          text: textToSend,
+          replyToId,
+          topicId
+        });
       }
+
       if (res.success) {
-        setInputText(''); setReplyTo(null); setSelectedFile(null);
         shouldScrollToBottomRef.current = true;
-        loadMessages(selectedChat.id, 0, topicId);
-      } else setError(res.error || 'Falha ao enviar');
-    } catch (e: any) { setError(e.message || 'Erro ao enviar'); }
-    finally { setIsSending(false); setSendProgress(null); }
+        // Refresh messages silently in background
+        loadMessages(selectedChat.id, 0, topicId, { silent: true });
+      } else {
+        setError(res.error || 'Falha ao enviar');
+        // Restore input text on error so user doesn't lose it
+        setInputText(textToSend);
+        if (fileToSend) setSelectedFile(fileToSend);
+      }
+    } catch (e: any) {
+      setError(e.message || 'Erro ao enviar');
+      setInputText(textToSend);
+      if (fileToSend) setSelectedFile(fileToSend);
+    } finally {
+      setIsSending(false);
+      setSendProgress(null);
+    }
   };
 
   const handleCreateTopic = async () => {
@@ -1153,7 +1184,7 @@ export const Dashboard: React.FC = () => {
                   ref={timelineRef}
                   onClick={() => { if (isMenuOpen) setIsMenuOpen(false); if (msgContextMenu) setMsgContextMenu(null); }}
                 >
-                  {loadingMessages ? (
+                  {loadingMessages && messages.length === 0 ? (
                     <div className="messages-loading"><span className="spinner" /> Carregando...</div>
                   ) : messages.length === 0 ? (
                     <div className="messages-empty">Nenhuma mensagem encontrada.</div>
